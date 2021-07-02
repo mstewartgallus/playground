@@ -3,13 +3,22 @@
 
 ; Simple calculus loosely based around Tarski's cylindrical logic
 ; and Monadic Boolean algebra and Interior algebra
+; and S5 Modal logic
 
 (define-language cyl
   (z integer)
-  ; Think of κ as pointer/an index into an array of values 
+  ; Think of κ as pointer/an index into an array of quantifiers
   (κ natural)
 
-  (τ ∅ ⊤ (τ → τ) (τ + τ) (τ × τ) (Σ κ τ) (∀ κ τ) (κ = κ) Z)
+  (τ ∅ ⊤ (τ → τ) (τ + τ) (τ × τ)
+     
+     ; Possibly, like existential
+     (◇ κ τ)
+     ; Necessarily, like universal
+     (□ κ τ)
+
+     (κ = κ)
+     Z)
   
   (v x
      !
@@ -18,10 +27,9 @@
      (e Δ e)
      (inl τ e) (inr τ e)
 
-     (box κ e)
-     ; not at all sure
-     (cons e e)
-     
+     (nec κ v)
+     (box κ v)
+    
      (id κ)
      z)
 
@@ -35,14 +43,17 @@
 
      (case e (x e) (x e))
 
-     ; not at all sure
-     (head e)
-     (tail e)
-     
-     (spec e)
-     ; Seem wrong
-     (uncurry e)
-     (curry e)
+     (nec κ e)
+     (box κ e)
+
+     (let (x e) e)
+
+     (T e)
+     (K e e)
+     (dup e)
+
+     (□-comm e)
+     (◇-comm e)
 
      (e ∘ e)
      (sym e)
@@ -57,7 +68,8 @@
  
   #:binding-forms
   (λ (x τ) e #:refers-to x)
-  (case e (x e #:refers-to x) (x e #:refers-to x)))
+  (case e (x e #:refers-to x) (x e #:refers-to x))
+  (let (x e) e #:refers-to x))
 
 (define-extended-language cyl+Γ cyl
   [Γ () (p ...)]
@@ -108,39 +120,46 @@
    -------------------------
    (types (p ...) (case e_0 (x_0 e_1) (x_1 e_2)) τ_2)]
 
-  ; Existentials
+  ; Universal
+  [(types () e τ)
+   -------------------------
+   (types Γ (nec κ e) (□ κ τ))]
+  
+  [(types Γ e (□ κ τ))
+   -------------------------
+   (types Γ (T e) τ)]
+  
+  [(types Γ e_0 (□ κ (τ_0 → τ_1)))
+   (types Γ e_1 (□ κ τ_0))
+   -------------------------
+   (types Γ (K e_0 e_1) (□ κ τ_1))]
 
+  [(types Γ e (□ κ τ))
+   -------------------------
+   (types Γ (dup e) (□ κ (□ κ τ)))]
+
+  ; Existentials
+  ; yes the M-word
+ 
   [(types Γ e τ)
     -------------------------
-   (types Γ (box κ e) (Σ κ τ))]
+   (types Γ (box κ e) (◇ κ τ))]
 
-  ; FIXME not sure of a better way
-  [(types Γ e_0 (Σ κ τ_0))
-    (types Γ e_1 (Σ κ τ_1))
+  [(types (p ...) e_0 (◇ κ τ_0))
+   (types ([x : τ_0] p ...) e_1 (◇ κ τ_1))
     -------------------------
-    (types Γ (cons e_0 e_1) (Σ κ (τ_0 × (Σ κ τ_1))))]
-  [ (types Γ e (Σ κ (τ_0 × (Σ κ τ_1))))
-    -------------------------
-   (types Γ (head e) (Σ κ τ_0))]
-  [ (types Γ e (Σ κ (τ_0 × (Σ κ τ_1))))
-    -------------------------
-   (types Γ (tail e) (Σ κ τ_1))]
+   (types (p ...) (let (x e_0) e_1) (◇ κ τ_1))]
 
-  ; Universal
-  [(types Γ e (∀ κ τ))
-   -------------------------
-   (types Γ (spec e) τ)]
-  
-  [-------------------------
-   (types Γ (tt κ) (∀ κ ⊤))]
-  ; FIXME doesn't seem right
-  [(types Γ e (∀ κ (τ_0 × (∀ κ τ_1))))
-   -------------------------
-   (types Γ (uncurry e) (∀ κ (τ_0 × τ_1)))]
-  [(types Γ e (∀ κ (τ_0 × τ_1)))
-   -------------------------
-   (types Γ (curry e) (∀ κ (τ_0 × (∀ κ τ_1))))]
-  
+  ; Commutativity of existentials/universals
+   
+  [(types Γ e (□ κ_1 (□ κ_0 τ)))
+    -------------------------
+   (types Γ (□-comm e) (□ κ_0 (□ κ_1 τ)))]
+
+  [(types Γ e (◇ κ_1 (◇ κ_0 τ)))
+    -------------------------
+   (types Γ (◇-comm e) (◇ κ_0 (◇ κ_1 τ)))]
+
   ; Identity type reflexivity, transitivity and symmetry.
   [
    -------------------------
@@ -183,11 +202,18 @@
 
      (case E (x e) (x e))
 
-     (head E)
-     (tail E)
+     (nec κ E)
+     (box κ E)
 
-     (spec E)
-     
+     (T E)
+     (dup E)
+     (K E e) (K v E)
+
+     (let (x E) e)
+
+     (□-comm E)
+     (◇-comm E)
+
      (v ∘ E) (E ∘ e)
      (sym E)
      (cast E e) (cast v E)
@@ -198,7 +224,9 @@
     )
   
   #:binding-forms
-  (case E (x e #:refers-to x) (x e #:refers-to x)))
+  (case E (x e #:refers-to x) (x e #:refers-to x))
+  (let (x E) e #:refers-to x)
+  )
 
 (define-metafunction cyl+stk
   add : integer integer -> integer
@@ -229,21 +257,27 @@
    (--> (in-hole E (case (inr τ e_0) (x_0 e_1) (x_1 e_2)))
         (in-hole E (substitute e_2 x_1 e_0))
         "+-case-inr")
-
-   ; Not at all sure of these
-   (--> (in-hole E (head (cons e_0 e_1)))
-        (in-hole E e_0)
-        "Σ-head")
-   (--> (in-hole E (tail (cons e_0 e_1)))
-        (in-hole E e_1)
-        "Σ-tail")
    
-   (--> (in-hole E (spec (tt κ)))
-        (in-hole E !)
-        "∀-spec")   
-   (--> (in-hole E (curry (uncurry e)))
+   (--> (in-hole E (T (nec κ e)))
         (in-hole E e)
-        "∀-curry/uncurry")
+        "□-T")
+   (--> (in-hole E (K (nec κ e_0) (nec κ e_1)))
+        (in-hole E (nec κ (e_0 e_1)))
+        "□-K")
+   (--> (in-hole E (dup (nec κ e)))
+        (in-hole E (nec κ (nec κ e)))
+        "□-dup")
+   
+   (--> (in-hole E (□-comm (nec κ_0 (nec κ_1 e))))
+        (in-hole E (nec κ_1 (nec κ_0 e)))
+        "□-comm")
+
+   (--> (in-hole E (let (x (box κ e_0)) e_1))
+        (in-hole E (substitute e_1 x e_0))
+        "◇-let")
+   (--> (in-hole E (◇-comm (box κ_0 (box κ_1 e))))
+        (in-hole E (box κ_1 (box κ_0 e)))
+        "◇-comm")
 
    (--> (in-hole E ((id κ) ∘ (id κ)))
         (in-hole E (id κ))
@@ -281,7 +315,5 @@
 
 (test--> cyl-whnf
          (term ((λ (x Z) x) 4)) (term 4))
-(test--> cyl-whnf
-         (term (tail (cons (box 0 4) (box 0 8)))) (term (box 0 8)))
 (test--> cyl-whnf
          (term (cast (id 0) (box 0 4))) (term (box 0 4)))
