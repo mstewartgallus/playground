@@ -2,36 +2,55 @@
 (require redex)
 
 ; Simple calculus loosely based around Tarski's cylindrical logic
+; and Monadic Boolean algebra and Interior algebra
 
 (define-language cyl
   (z integer)
+  ; Think of κ as pointer/an index into an array of values 
   (κ natural)
 
-  (τ (τ → τ) (τ + τ) (τ × τ) (Σ κ τ) (κ = κ) Z)
+  (τ ∅ ⊤ (τ → τ) (τ + τ) (τ × τ) (Σ κ τ) (∀ κ τ) (κ = κ) Z)
   
   (v x
+     !
      (λ (x τ) e)
-     (inl τ e)
-     (inr τ e)
+
+     (e Δ e)
+     (inl τ e) (inr τ e)
+
      (box κ e)
+     ; not at all sure
      (cons e e)
+     
      (id κ)
      z)
 
   (e v
+     (absurd τ e)
+
      (e e)
+
+     (fst e)
+     (snd e)
+
      (case e (x e) (x e))
 
-     (cons e e)
+     ; not at all sure
      (head e)
      (tail e)
+     
+     (spec e)
+     ; Seem wrong
+     (uncurry e)
+     (curry e)
 
      (e ∘ e)
      (sym e)
      (cast e e)
-
-     (e * e)
+     
      (e + e)
+     (e - e)
+     (e × e)
      )
 
   (x variable-not-otherwise-mentioned)
@@ -56,7 +75,27 @@
    -------------------------
    (types (p ...) (λ (x τ_0) e) (τ_0 → τ_1))]
 
-  ; Sum types
+  ; Empty Set
+  [(types Γ e ∅)
+   -------------------------
+   (types Γ (absurd τ e) τ)]  
+
+  ; Point
+  [-------------------------
+   (types Γ ! ⊤)]
+  
+  ; Product
+  [(types Γ e_0 τ_0) (types Γ e_1 τ_1)
+   -------------------------
+   (types Γ (e_0 Δ e_1) (τ_0 × τ_1))]  
+  [(types Γ e (τ_0 × τ_1))
+   -------------------------
+   (types Γ (fst e) τ_0)]  
+  [(types Γ e (τ_0 × τ_1))
+   -------------------------
+   (types Γ (snd e) τ_1)]  
+  
+  ; Sum
   [(types Γ e τ_0)
    -------------------------
    (types Γ (inl τ_1 e) (τ_0 + τ_1))]  
@@ -69,11 +108,14 @@
    -------------------------
    (types (p ...) (case e_0 (x_0 e_1) (x_1 e_2)) τ_2)]
 
-  ; Existential introduction/tuple manipulation
-  [ (types Γ e τ)
+  ; Existentials
+
+  [(types Γ e τ)
     -------------------------
    (types Γ (box κ e) (Σ κ τ))]
-   [(types Γ e_0 (Σ κ τ_0))
+
+  ; FIXME not sure of a better way
+  [(types Γ e_0 (Σ κ τ_0))
     (types Γ e_1 (Σ κ τ_1))
     -------------------------
     (types Γ (cons e_0 e_1) (Σ κ (τ_0 × (Σ κ τ_1))))]
@@ -84,6 +126,21 @@
     -------------------------
    (types Γ (tail e) (Σ κ τ_1))]
 
+  ; Universal
+  [(types Γ e (∀ κ τ))
+   -------------------------
+   (types Γ (spec e) τ)]
+  
+  [-------------------------
+   (types Γ (tt κ) (∀ κ ⊤))]
+  ; FIXME doesn't seem right
+  [(types Γ e (∀ κ (τ_0 × (∀ κ τ_1))))
+   -------------------------
+   (types Γ (uncurry e) (∀ κ (τ_0 × τ_1)))]
+  [(types Γ e (∀ κ (τ_0 × τ_1)))
+   -------------------------
+   (types Γ (curry e) (∀ κ (τ_0 × (∀ κ τ_1))))]
+  
   ; Identity type reflexivity, transitivity and symmetry.
   [
    -------------------------
@@ -94,6 +151,7 @@
   [(types Γ e (κ_0 = κ_1))
    -------------------------
    (types Γ (sym e) (κ_1 = κ_0))]
+
   ; Use identity to cast from one sum to another
   ; Not at all sure of this rule
   [(types Γ e_0 (κ_0 = κ_1)) (types Γ e_1 (Σ κ_0 τ))  
@@ -111,21 +169,32 @@
    (types Γ (e_0 - e_1) Z)]
   [(types Γ e_0 Z) (types Γ e_1 Z)  
    -------------------------
-   (types Γ (e_0 * e_1) Z)]
+   (types Γ (e_0 × e_1) Z)]
 )
 
 (define-extended-language cyl+stk cyl
   (E hole
+     (absurd E)
+
      (E e)
+
+     (fst E)
+     (snd E)
+
      (case E (x e) (x e))
 
+     (head E)
+     (tail E)
+
+     (spec E)
+     
      (v ∘ E) (E ∘ e)
      (sym E)
      (cast E e) (cast v E)
 
      (E + e) (v + E)
      (E - e) (v - E)
-     (E * e) (v * E)
+     (E × e) (v × E)
     )
   
   #:binding-forms
@@ -145,7 +214,14 @@
   (reduction-relation cyl+stk #:domain e
    (--> (in-hole E ((λ (x τ) e_0) e_1))
         (in-hole E (substitute e_1 x e_0))
-        "λ-subst")
+        "→-subst")
+
+   (--> (in-hole E (fst (e_0 Δ e_1)))
+        (in-hole E e_0)
+        "×-fst")
+   (--> (in-hole E (snd (e_0 Δ e_1)))
+        (in-hole E e_1)
+        "×-snd")
 
    (--> (in-hole E (case (inl τ e_0) (x_0 e_1) (x_1 e_2)))
         (in-hole E (substitute e_1 x_0 e_0))
@@ -153,13 +229,21 @@
    (--> (in-hole E (case (inr τ e_0) (x_0 e_1) (x_1 e_2)))
         (in-hole E (substitute e_2 x_1 e_0))
         "+-case-inr")
-     
+
+   ; Not at all sure of these
    (--> (in-hole E (head (cons e_0 e_1)))
         (in-hole E e_0)
         "Σ-head")
    (--> (in-hole E (tail (cons e_0 e_1)))
         (in-hole E e_1)
         "Σ-tail")
+   
+   (--> (in-hole E (spec (tt κ)))
+        (in-hole E !)
+        "∀-spec")   
+   (--> (in-hole E (curry (uncurry e)))
+        (in-hole E e)
+        "∀-curry/uncurry")
 
    (--> (in-hole E ((id κ) ∘ (id κ)))
         (in-hole E (id κ))
@@ -177,7 +261,7 @@
    (--> (in-hole E (z_0 - z_1))
         (in-hole E (sub z_0 z_1))
         "z--")
-   (--> (in-hole E (z_0 * z_1))
+   (--> (in-hole E (z_0 × z_1))
         (in-hole E (mul z_0 z_1))
         "z-*")
         )
