@@ -5,20 +5,15 @@ Import ListNotations.
 
 Close Scope nat.
 
-Inductive sort α :=
+Inductive sort {α} :=
 | unit
-| prod (A B: sort α)
-| exp (s t: sort α)
-| pos (κ: α) (A: sort α)
-| nec (κ: α) (A: sort α)
+| prod (A B: sort)
+| exp (s t: sort)
+| pos (κ: α) (A: sort)
+| nec (κ: α) (A: sort)
 | eq (κ μ: α).
 
-Arguments unit {α}.
-Arguments prod {α}.
-Arguments exp {α}.
-Arguments pos {α}.
-Arguments nec {α}.
-Arguments eq {α}.
+Arguments sort: clear implicits.
 
 Notation "[ A , B ]" := (exp A B).
 Infix "×" := prod (at level 50).
@@ -29,51 +24,31 @@ Infix "~" := eq (at level 90).
 
 Reserved Notation "f ∘ g" (at level 30).
 
-Inductive tm v α :=
+Inductive tm {v α} :=
 | var (x: v)
 
-| lam (x: v) (s: sort α) (e: tm v α)
-| app (f x: tm v α)
+| lam (x: v) (s: sort α) (e: tm)
+| app (f x: tm)
 
 | tt
 
-| fanout (e0 e1: tm v α)
-| π1 (e: tm v α)
-| π2 (e: tm v α)
+| fanout (e0 e1: tm)
+| π1 (e: tm)
+| π2 (e: tm)
 
-| necessity (κ: α) (e: tm v α)
-| ext (κ: α) (e: tm v α)
-| dup (e: tm v α)
+| necessity (κ: α) (e: tm)
+| ext (κ: α) (e: tm)
+| dup (e: tm)
 
-| box (κ: α) (e: tm v α)
-| bind (e0: tm v α) (x: v) (e1: tm v α)
+| box (κ: α) (e: tm)
+| bind (e0: tm) (x: v) (e1: tm)
 
 | id (κ: α)
-| compose (e0 e1: tm v α)
-| sym (e: tm v α)
+| compose (e0 e1: tm)
+| sym (e: tm)
 .
 
-Arguments var {v α}.
-
-Arguments lam {v α}.
-Arguments app {v α}.
-
-Arguments tt {v α}.
-
-Arguments fanout {v α}.
-Arguments π1 {v α}.
-Arguments π2 {v α}.
-
-Arguments necessity {v α}.
-Arguments ext {v α}.
-Arguments dup {v α}.
-
-Arguments box {v α}.
-Arguments bind {v α}.
-
-Arguments id {v α}.
-Arguments compose {v α}.
-Arguments sym {v α}.
+Arguments tm: clear implicits.
 
 Infix "∘" := compose.
 Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z).
@@ -93,9 +68,9 @@ Record bundle A := sup {
   s: Type ;
   π: s → A ;
 }.
-
 Arguments sup {A}.
 Arguments π {A}.
+
 Coercion s: bundle >-> Sortclass.
 
 Notation "'sup' x .. y , P" := {| π x := .. {| π y := P |} .. |}
@@ -105,18 +80,18 @@ Notation "'sup' x .. y , P" := {| π x := .. {| π y := P |} .. |}
 
 Reserved Notation "{ P ———— Q }" (at level 90, format "{ '//' P '//' ———— '//' Q }").
 
-Record prop A := impl {
-                     head: A ;
-                     tail: list A ;
-                     }.
-
+Record prop A :=
+  impl {
+      head: A ;
+      tail: list A ;
+    }.
 Arguments impl {A}.
 Arguments head {A}.
 Arguments tail {A}.
 
 Notation "{ P ———— Q }" := (impl Q P).
 
-Variant rule :=
+Variant judgement :=
 | judge_var_head
 | judge_var_tail
 
@@ -141,7 +116,7 @@ Variant rule :=
 | judge_sym
 .
 
-Definition judge v α (r: rule): bundle (prop (ofty v α)) :=
+Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
   match r with
   | judge_var_head =>
     sup '(Γ, τ, x), {
@@ -249,24 +224,20 @@ Definition judge v α (r: rule): bundle (prop (ofty v α)) :=
     }
   end.
 
-(* Inductive forest v := *)
-(* | mt *)
-(* | premise: list (ofty v) → forest v → forest v. *)
-
 Inductive proof v α: list (ofty v α) → Type :=
 | QED: proof v α []
-| step
+| andso
     {T}
-    (r: rule)
+    (r: judgement)
     (s: judge v α r)
   :
     proof v α (tail (π (judge v α r) s) ++ T) →
     proof v α (head (π (judge v α r) s) :: T).
 
 Arguments QED {v α}.
-Arguments step {v α T}.
+Arguments andso {v α T}.
 
-Notation "A # B ; C" := (step A B C) (at level 60, right associativity,
+Notation "A # B ; C" := (andso A B C) (at level 60, right associativity,
                                       format "A  #  B  ; '//' C").
 
 Example proof_tt v α: proof v α [[] ⊢ tt ∈ unit] :=
@@ -297,3 +268,89 @@ Example proof_nec_tt v α κ: proof v α [[] ⊢ necessity κ tt ∈ □ κ, uni
   judge_necessity # ([], κ, unit, tt) ;
   judge_tt # [] ;
   QED.
+
+Record trans v α := trans_intro {
+  from: tm v α;
+  to: tm v α;
+}.
+Arguments trans_intro {v α}.
+Arguments from {v α}.
+Arguments to {v α}.
+
+Notation "A ~> B" := (trans_intro A B) (at level 80).
+
+Variant label :=
+| label_π1_fanout
+| label_π2_fanout
+
+| label_ext_necessity
+
+| label_compose_id
+| label_sym_id
+.
+
+Definition reduce v α (l: label): bundle (prop (trans v α)) :=
+  match l with
+    (* FIXME use one hole contexts? *)
+  | label_ext_necessity =>
+    sup '(κ, e), {
+      []
+      ————
+      ext κ (necessity κ e) ~> e
+    }
+  | label_π1_fanout =>
+    sup '(e0, e1), {
+      []
+      ————
+      π1 ⟨e0, e1⟩ ~> e0
+    }
+  | label_π2_fanout =>
+    sup '(e0, e1), {
+      []
+      ————
+      π1 ⟨e0, e1⟩ ~> e0
+    }
+
+  | label_compose_id =>
+    sup κ, {
+      []
+      ————
+      (id κ ∘ id κ) ~> id κ
+    }
+
+  | label_sym_id =>
+    sup κ, {
+      []
+      ————
+      sym (id κ) ~> id κ
+    }
+  end
+.
+(* Unfortunately seq cannot be the same as proof due to weird
+inference issues *)
+
+Inductive seq v α: list (trans v α) → Type :=
+| HALT: seq v α []
+| step
+    {T}
+    (r: label)
+    (s: reduce v α r)
+  :
+    seq v α (tail (π (reduce v α r) s) ++ T) →
+    seq v α (head (π (reduce v α r) s) :: T).
+
+Arguments HALT {v α}.
+Arguments step {v α T}.
+
+Notation "A @ B ; C" := (step A B C) (at level 60, right associativity,
+                                      format "A  @  B  ; '//' C").
+
+Example seq_id v α κ: seq v α [id κ ∘ id κ ~> id κ]
+  :=
+  label_compose_id @ κ ;
+  HALT.
+
+Example seq_sym v α κ: seq v α [sym (id κ) ~> id κ]
+  :=
+  label_sym_id @ κ ;
+  HALT.
