@@ -1,7 +1,9 @@
 Require Import Coq.Unicode.Utf8.
 Require Import Coq.Lists.List.
+Require Import Coq.Strings.String.
 Import IfNotations.
 Import ListNotations.
+Open Scope string_scope.
 
 Close Scope nat.
 
@@ -24,10 +26,13 @@ Infix "~" := eq (at level 90).
 
 Reserved Notation "f ∘ g" (at level 30).
 
-Inductive tm {v α} :=
-| var (x: v)
+(* Strings are really dumb but I don't want to figure out two things
+at the same time *)
 
-| lam (x: v) (s: sort α) (e: tm)
+Inductive tm {α} :=
+| var (x: string)
+
+| lam (x: string) (s: sort α) (e: tm)
 | app (f x: tm)
 
 | tt
@@ -44,7 +49,7 @@ Inductive tm {v α} :=
 
 | pos_comm (e: tm)
 | box (κ: α) (e: tm)
-| bind (e0: tm) (x: v) (e1: tm)
+| bind (e0: tm) (x: string) (e1: tm)
 
 | id (κ: α)
 | compose (e0 e1: tm)
@@ -59,15 +64,22 @@ Arguments tm: clear implicits.
 Infix "∘" := compose.
 Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z).
 
-Record ofty v α := ofty_intro {
-  Γ: list (v * sort α) ;
-  e: tm v α;
+CoInductive stream A := cons { hd: A ; tl: stream A }.
+Arguments cons {A}.
+Arguments hd {A}.
+Arguments tl {A}.
+
+CoFixpoint mt {α} : stream (string * sort α) := cons ("", unit) mt.
+
+Record ofty α := ofty_intro {
+  Γ: stream (string * sort α) ;
+  e: tm α;
   τ: sort α;
 }.
-Arguments ofty_intro {v α}.
-Arguments Γ {v α}.
-Arguments e {v α}.
-Arguments τ {v α}.
+Arguments ofty_intro {α}.
+Arguments Γ {α}.
+Arguments e {α}.
+Arguments τ {α}.
 Notation "Γ ⊢ e ∈ τ" := (ofty_intro Γ e τ) (at level 80).
 
 Record bundle A := sup {
@@ -130,20 +142,20 @@ Variant judgement :=
 | judge_cast_pos
 .
 
-Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
+Definition judge α (r: judgement): bundle (prop (ofty α)) :=
   match r with
   | judge_var_head =>
-    sup '(Γ, τ, x), {
+    sup '(Γ, x, τ), {
       []
       ————
-      (x, τ) :: Γ ⊢ var x ∈ τ
+      cons (x, τ) Γ ⊢ var x ∈ τ
     }
+
   | judge_var_tail =>
-    (* Not sure how to deal with variable shadowing  *)
-    sup '(Γ, H, τ, x), {
-      [(x, τ) :: Γ ⊢ var x ∈ τ]
+    sup '(H, Γ, x, τ), {
+      [Γ ⊢ var x ∈ τ]
       ————
-      H :: Γ ⊢ var x ∈ τ
+      cons H Γ ⊢ var x ∈ τ
     }
 
   | judge_tt =>
@@ -173,7 +185,7 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
 
   | judge_lam =>
     sup '(Γ, τ0, τ1, x, e), {
-      [(x, τ0) :: Γ ⊢ e ∈ τ1]
+      [cons (x, τ0) Γ ⊢ e ∈ τ1]
       ————
       Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
     }
@@ -186,7 +198,7 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
 
   | judge_necessity =>
     sup '(Γ, κ, τ, e), {
-      [[] ⊢ e ∈ τ]
+      [mt ⊢ e ∈ τ]
       ————
       Γ ⊢ necessity κ e ∈ (□ κ, τ)
     }
@@ -226,7 +238,7 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
   | judge_bind =>
     sup '(Γ, κ, τ0, τ1, x, e0, e1), {
       [Γ ⊢ e0 ∈ (□ κ, τ0) ;
-       ((x, τ0) :: Γ) ⊢ e1 ∈ (□ κ, τ1)]
+       cons (x, τ0) Γ ⊢ e1 ∈ (□ κ, τ1)]
       ————
       Γ ⊢ bind e0 x e1 ∈ (□ κ, τ1)
     }
@@ -267,68 +279,68 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
     }
   end.
 
-Inductive proof v α: list (ofty v α) → Type :=
-| QED: proof v α []
+Inductive proof α: list (ofty α) → Type :=
+| QED: proof α []
 | andso
     {T}
     (r: judgement)
-    (s: judge v α r)
+    (s: judge α r)
   :
-    proof v α (tail (π (judge v α r) s) ++ T) →
-    proof v α (head (π (judge v α r) s) :: T).
+    proof α (tail (π (judge α r) s) ++ T) →
+    proof α (head (π (judge α r) s) :: T).
 
-Arguments QED {v α}.
-Arguments andso {v α T}.
+Arguments QED {α}.
+Arguments andso {α T}.
 
 Notation "A # B ; C" := (andso A B C) (at level 60, right associativity,
                                       format "A  #  B  ; '//' C").
 
-Example proof_tt v α: proof v α [[] ⊢ tt ∈ unit] :=
+Example proof_tt α: proof α [mt ⊢ tt ∈ unit] :=
   judge_tt # _ ;
   QED.
 
-Example proof_compose v α κ: proof v α [[] ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
+Example proof_compose α κ: proof α [mt ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
   :=
-    judge_compose # ([], κ, κ, κ, id κ, id κ) ;
-    judge_id # ([], κ) ;
-    judge_id # ([], κ) ;
+    judge_compose # (mt, κ, κ, κ, id κ, id κ) ;
+    judge_id # (mt, κ) ;
+    judge_id # (mt, κ) ;
     QED.
 
-Example proof_id v α x A: proof v α [[] ⊢ lam x A (var x) ∈ [A, A]]
+Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]]
   :=
-  judge_lam # ([], A, A, x, var x) ;
-  judge_var_head # ([], A, x) ;
+  judge_lam # (mt, A, A, "x", var "x") ;
+  judge_var_head # (mt, "x", A) ;
   QED.
 
-Example proof_const v α x y A B: proof v α [[] ⊢ lam x A (lam y B (var x)) ∈ [A, [B, A]]] :=
-  judge_lam # ([], A, [B, A], x, lam y B (var x)) ;
-  judge_lam # ([(x, A)], B, A, y, var x) ;
-  judge_var_tail # ([(x, A)], (y, B), A, x) ;
-  judge_var_head # ([(x, A)], A, x) ;
+Example proof_const α A B: proof α [mt ⊢ lam "x" A (lam "y" B (var "x")) ∈ [A, [B, A]]] :=
+  judge_lam # (mt, A, [B, A], "x", lam "y" B (var "x")) ;
+  judge_lam # ({| hd := ("x", A); tl := mt |}, B, A, "y", var "x") ;
+  judge_var_tail # ("y", B, {| hd := ("x", A); tl := mt |}, "x", A) ;
+  judge_var_head # (mt, "x", A) ;
   QED.
 
-Example proof_nec_tt v α κ: proof v α [[] ⊢ necessity κ tt ∈ □ κ, unit] :=
-  judge_necessity # ([], κ, unit, tt) ;
-  judge_tt # [] ;
+Example proof_nec_tt α κ: proof α [mt ⊢ necessity κ tt ∈ □ κ, unit] :=
+  judge_necessity # (mt, κ, unit, tt) ;
+  judge_tt # mt ;
   QED.
 
-Record heap v α := { top: nat ; read: nat → tm v α ;}.
-Arguments top {v α}.
-Arguments read {v α}.
+Record heap α := { top: nat ; read: nat → tm α ;}.
+Arguments top {α}.
+Arguments read {α}.
 
-Definition alloc {v α} (σ: heap v α) (e: tm v α): nat * heap v α :=
+Definition alloc {α} (σ: heap α) (e: tm α): nat * heap α :=
   let ix := top σ in
   (ix, {| top := S ix ; read n := if Nat.eqb n ix then e else read σ n |}).
-
-Record big v α := big_intro {
-  env: list (v * nat) ;
-  from: heap v α * tm v α;
-  to: heap v α * tm v α;
+(* FIXME just do the damn substitution *)
+Record big α := big_intro {
+  env: list (string * nat) ;
+  from: heap α * tm α;
+  to: heap α * tm α;
 }.
-Arguments big_intro {v α}.
-Arguments env {v α}.
-Arguments from {v α}.
-Arguments to {v α}.
+Arguments big_intro {α}.
+Arguments env {α}.
+Arguments from {α}.
+Arguments to {α}.
 
 Notation "s ⊨ A ⇓ B" := (big_intro s A B) (at level 80).
 
@@ -362,7 +374,7 @@ Variant label :=
 | label_cast_nec
 .
 
-Definition reduce v α (l: label): bundle (prop (big v α)) :=
+Definition reduce α (l: label): bundle (prop (big α)) :=
   match l with
 (* FIXME environment/store is probably all wrong :( *)
   | label_var_head =>
@@ -515,29 +527,29 @@ Definition reduce v α (l: label): bundle (prop (big v α)) :=
 (* Unfortunately seq cannot be the same as proof due to weird
 inference issues *)
 
-Inductive seq v α: list (big v α) → Type :=
-| HALT: seq v α []
+Inductive seq α: list (big α) → Type :=
+| HALT: seq α []
 | step
     {T}
     (r: label)
-    (s: reduce v α r)
+    (s: reduce α r)
   :
-    seq v α (tail (π (reduce v α r) s) ++ T) →
-    seq v α (head (π (reduce v α r) s) :: T).
+    seq α (tail (π (reduce α r) s) ++ T) →
+    seq α (head (π (reduce α r) s) :: T).
 
-Arguments HALT {v α}.
-Arguments step {v α T}.
+Arguments HALT {α}.
+Arguments step {α T}.
 
 Notation "A @ B ; C" := (step A B C) (at level 60, right associativity,
                                       format "A  @  B  ; '//' C").
 
-Example seq_id v α κ σ: seq v α [[] ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
+Example seq_id α κ σ: seq α [[] ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
   label_compose_id @ ([], σ,σ,σ, κ, id κ, id κ) ;
   label_id @ ([], σ, κ) ;
   label_id @ ([], σ, κ) ;
   HALT.
 
-Example seq_sym v α κ σ: seq v α [[] ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
+Example seq_sym α κ σ: seq α [[] ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
   :=
   label_sym_id @ ([], σ, σ, κ, id κ) ;
   label_id @ ([], σ, κ) ;
