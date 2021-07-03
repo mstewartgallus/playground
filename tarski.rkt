@@ -27,7 +27,7 @@
      (e Δ e)
      (inl τ e) (inr τ e)
 
-     (nec κ v)
+     (κ ⊢ v)
      (box κ v)
     
      (id κ)
@@ -43,7 +43,7 @@
 
      (case e (x e) (x e))
 
-     (nec κ e)
+     (κ ⊢ e)
      (box κ e)
 
      (let (x e) e)
@@ -123,7 +123,7 @@
   ; Universal
   [(types () e τ)
    -------------------------
-   (types Γ (nec κ e) (□ κ τ))]
+   (types Γ (κ ⊢ e) (□ κ τ))]
   
   [(types Γ e (□ κ τ))
    -------------------------
@@ -202,7 +202,7 @@
 
      (case E (x e) (x e))
 
-     (nec κ E)
+     (κ ⊢ E)
      (box κ E)
 
      (T E)
@@ -258,18 +258,18 @@
         (in-hole E (substitute e_2 x_1 e_0))
         "+-case-inr")
    
-   (--> (in-hole E (T (nec κ e)))
+   (--> (in-hole E (T (κ ⊢ e)))
         (in-hole E e)
         "□-T")
-   (--> (in-hole E (K (nec κ e_0) (nec κ e_1)))
-        (in-hole E (nec κ (e_0 e_1)))
+   (--> (in-hole E (K (κ ⊢ e_0) (κ ⊢ e_1)))
+        (in-hole E (κ ⊢ (e_0 e_1)))
         "□-K")
-   (--> (in-hole E (dup (nec κ e)))
-        (in-hole E (nec κ (nec κ e)))
+   (--> (in-hole E (dup (κ ⊢ e)))
+        (in-hole E (κ ⊢ (κ ⊢ e)))
         "□-dup")
    
-   (--> (in-hole E (□-comm (nec κ_0 (nec κ_1 e))))
-        (in-hole E (nec κ_1 (nec κ_0 e)))
+   (--> (in-hole E (□-comm (κ_0 ⊢ (κ_1 ⊢ e))))
+        (in-hole E (κ_1 ⊢ (κ_0 ⊢ e)))
         "□-comm")
 
    (--> (in-hole E (let (x (box κ e_0)) e_1))
