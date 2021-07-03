@@ -23,52 +23,64 @@ Infix "~" := eq (at level 90).
 
 Reserved Notation "f ∘ g" (at level 30).
 
-Inductive tm :=
-| var (n: nat)
+Inductive tm v :=
+| var (x: v)
 
-| lam (s: sort) (e: tm)
-| app (f x: tm)
+| lam (x: v) (s: sort) (e: tm v)
+| app (f x: tm v)
 
 | tt
 
-| fanout (e0 e1: tm)
-| π1 (e: tm)
-| π2 (e: tm)
+| fanout (e0 e1: tm v)
+| π1 (e: tm v)
+| π2 (e: tm v)
 
-| necessity (κ: α) (e: tm)
-| ext (κ: α) (e: tm)
-| dup (e: tm)
+| necessity (κ: α) (e: tm v)
+| ext (κ: α) (e: tm v)
+| dup (e: tm v)
 
-| box (κ: α) (e: tm)
-| bind (e0 e1: tm)
+| box (κ: α) (e: tm v)
+| bind (e0: tm v) (x: v) (e1: tm v)
 
 | id (κ: α)
-| compose (e0 e1: tm)
-| sym (e: tm)
+| compose (e0 e1: tm v)
+| sym (e: tm v)
 .
+
+Arguments var {v}.
+
+Arguments lam {v}.
+Arguments app {v}.
+
+Arguments tt {v}.
+
+Arguments fanout {v}.
+Arguments π1 {v}.
+Arguments π2 {v}.
+
+Arguments necessity {v}.
+Arguments ext {v}.
+Arguments dup {v}.
+
+Arguments box {v}.
+Arguments bind {v}.
+
+Arguments id {v}.
+Arguments compose {v}.
+Arguments sym {v}.
+
 Infix "∘" := compose.
 Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z).
 
-CoInductive stream A := cons { hd: A ; tl: stream A; }.
-Arguments cons {A}.
-Arguments hd {A}.
-Arguments tl {A}.
-Infix "&" := cons (at level 50).
-
-Fixpoint ff {A} n (s: stream A) :=
-  match n with
-  | O => s
-  | S n' => ff n' (tl s)
-  end.
-
-CoFixpoint mt: stream sort := cons unit mt.
-Notation "∅" := mt.
-
-Record ofty := ofty_intro {
-  Γ: stream sort ;
-  e: tm ;
+Record ofty v := ofty_intro {
+  Γ: list (v * sort) ;
+  e: tm v ;
   τ: sort ;
 }.
+Arguments ofty_intro {v}.
+Arguments Γ {v}.
+Arguments e {v}.
+Arguments τ {v}.
 Notation "Γ ⊢ e ∈ τ" := (ofty_intro Γ e τ) (at level 80).
 
 Record bundle A := sup {
@@ -99,7 +111,8 @@ Arguments tail {A}.
 Notation "{ P ———— Q }" := (impl Q P).
 
 Variant rule :=
-| judge_var
+| judge_var_head
+| judge_var_tail
 
 | judge_tt
 
@@ -122,13 +135,20 @@ Variant rule :=
 | judge_sym
 .
 
-Definition judge (r: rule): bundle (prop ofty) :=
+Definition judge v (r: rule): bundle (prop (ofty v)) :=
   match r with
-  | judge_var =>
-    sup '(Γ, n), {
+  | judge_var_head =>
+    sup '(Γ, τ, x), {
       []
       ————
-      Γ ⊢ var n ∈ hd (ff n Γ)
+      (x, τ) :: Γ ⊢ var x ∈ τ
+    }
+  | judge_var_tail =>
+    (* Not sure how to deal with variable shadowing  *)
+    sup '(Γ, H, τ, x), {
+      [(x, τ) :: Γ ⊢ var x ∈ τ]
+      ————
+      H :: Γ ⊢ var x ∈ τ
     }
 
   | judge_tt =>
@@ -157,10 +177,10 @@ Definition judge (r: rule): bundle (prop ofty) :=
     }
 
   | judge_lam =>
-    sup '(Γ, τ0, τ1, e), {
-      [τ0 & Γ ⊢ e ∈ τ1]
+    sup '(Γ, τ0, τ1, x, e), {
+      [(x, τ0) :: Γ ⊢ e ∈ τ1]
       ————
-      Γ ⊢ lam τ0 e ∈ [τ0, τ1]
+      Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
     }
   | judge_app =>
     sup '(Γ, τ0, τ1, e0, e1), {
@@ -171,7 +191,7 @@ Definition judge (r: rule): bundle (prop ofty) :=
 
   | judge_necessity =>
     sup '(Γ, κ, τ, e), {
-      [∅ ⊢ e ∈ τ]
+      [[] ⊢ e ∈ τ]
       ————
       Γ ⊢ necessity κ e ∈ (□ κ, τ)
     }
@@ -195,13 +215,14 @@ Definition judge (r: rule): bundle (prop ofty) :=
       Γ ⊢ box κ e ∈ (□ κ, τ)
     }
   | judge_bind =>
-    sup '(Γ, κ, τ0, τ1, e0, e1), {
+    sup '(Γ, κ, τ0, τ1, x, e0, e1), {
       [Γ ⊢ e0 ∈ (□ κ, τ0) ;
-       (τ0 & Γ) ⊢ e1 ∈ (□ κ, τ1)]
+       ((x, τ0) :: Γ) ⊢ e1 ∈ (□ κ, τ1)]
       ————
-      Γ ⊢ bind e0 e1 ∈ (□ κ, τ1)
+      Γ ⊢ bind e0 x e1 ∈ (□ κ, τ1)
     }
 
+(* FIXME add commutativity rules *)
   | judge_id =>
     sup '(Γ, κ), {
       []
@@ -222,24 +243,43 @@ Definition judge (r: rule): bundle (prop ofty) :=
     }
   end.
 
-Inductive proof: list ofty → Type :=
-| QED: proof []
+Inductive proof v: list (ofty v) → Type :=
+| QED: proof v []
 | step
-    (r: rule)
-    (s: judge r)
     {T}
+    (r: rule)
+    (s: judge v r)
   :
-    proof (tail (π (judge r) s) ++ T) →
-    proof (head (π (judge r) s) :: T).
+    proof v (tail (π (judge v r) s) ++ T) →
+    proof v (head (π (judge v r) s) :: T).
 
-Notation "A # B >> C" := (step A B C) (at level 60, right associativity).
-Definition proof_tt: proof [mt ⊢ tt ∈ unit] :=
-  judge_tt # _ >>
+Arguments QED {v}.
+Arguments step {v T}.
+
+Notation "A # B ; C" := (step A B C) (at level 60, right associativity,
+                                      format "A  #  B  ; '//' C").
+
+Example proof_tt v: proof v [[] ⊢ tt ∈ unit] :=
+  judge_tt # _ ;
   QED.
 
-Definition proof_compose κ: proof [mt ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
+Example proof_compose v κ: proof v [[] ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
   :=
-    judge_compose # (∅, κ, κ, κ, id κ, id κ) >>
-    judge_id # (∅, κ) >>
-    judge_id # (∅, κ) >>
+    judge_compose # ([], κ, κ, κ, id κ, id κ) ;
+    judge_id # ([], κ) ;
+    judge_id # ([], κ) ;
     QED.
+
+Example proof_id v x A: proof v [[] ⊢ lam x A (var x) ∈ [A, A]]
+  :=
+  judge_lam # ([], A, A, x, var x) ;
+  judge_var_head # ([], A, x) ;
+  QED.
+
+Example proof_const v x y A B: proof v [[] ⊢ lam x A (lam y B (var x)) ∈ [A, [B, A]]]
+:=
+judge_lam # ([], A, [B, A], x, lam y B (var x)) ;
+judge_lam # ([(x, A)], B, A, y, var x) ;
+judge_var_tail # ([(x, A)], (y, B), A, x) ;
+judge_var_head # ([(x, A)], A, x) ;
+QED.
