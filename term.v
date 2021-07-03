@@ -37,15 +37,21 @@ Inductive tm {v α} :=
 | π2 (e: tm)
 
 | necessity (κ: α) (e: tm)
+| nec_comm (e: tm)
+
 | ext (κ: α) (e: tm)
 | dup (e: tm)
 
+| pos_comm (e: tm)
 | box (κ: α) (e: tm)
 | bind (e0: tm) (x: v) (e1: tm)
 
 | id (κ: α)
 | compose (e0 e1: tm)
 | sym (e: tm)
+
+| cast_pos (e0 e1: tm)
+| cast_nec (e0 e1: tm)
 .
 
 Arguments tm: clear implicits.
@@ -105,8 +111,13 @@ Variant judgement :=
 | judge_app
 
 | judge_necessity
+
+| judge_nec_comm
+
 | judge_ext
 | judge_dup
+
+| judge_pos_comm
 
 | judge_box
 | judge_bind
@@ -114,6 +125,9 @@ Variant judgement :=
 | judge_id
 | judge_compose
 | judge_sym
+
+| judge_cast_nec
+| judge_cast_pos
 .
 
 Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
@@ -176,6 +190,13 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
       ————
       Γ ⊢ necessity κ e ∈ (□ κ, τ)
     }
+  | judge_nec_comm =>
+    sup '(Γ, κ0, κ1, τ, e), {
+      [Γ ⊢ e ∈ (□ κ1, □ κ0, τ)]
+      ————
+      Γ ⊢ nec_comm e ∈ (□ κ1, □ κ0, τ)
+    }
+
   | judge_ext =>
     sup '(Γ, κ, τ, e), {
       [Γ ⊢ e ∈ (□ κ, τ)]
@@ -187,6 +208,13 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
       [Γ ⊢ e ∈ (□ κ, τ)]
       ————
       Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
+    }
+
+  | judge_pos_comm =>
+    sup '(Γ, κ0, κ1, τ, e), {
+      [Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ)]
+      ————
+      Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
     }
 
   | judge_box =>
@@ -203,7 +231,6 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
       Γ ⊢ bind e0 x e1 ∈ (□ κ, τ1)
     }
 
-(* FIXME add commutativity rules *)
   | judge_id =>
     sup '(Γ, κ), {
       []
@@ -221,6 +248,22 @@ Definition judge v α (r: judgement): bundle (prop (ofty v α)) :=
       [Γ ⊢ e ∈ (κ0 ~ κ1) ]
       ————
       Γ ⊢ sym e ∈ (κ1 ~ κ0)
+    }
+
+  (* Really unsure of these as faithful to cylindrical logic *)
+  | judge_cast_pos =>
+    sup '(Γ, κ0, κ1, τ, e0, e1), {
+      [Γ ⊢ e0 ∈ (κ0 ~ κ1) ;
+       Γ ⊢ e1 ∈ (◇ κ0, τ) ]
+      ————
+      Γ ⊢ cast_pos e0 e1 ∈ (◇ κ1, τ)
+    }
+  | judge_cast_nec =>
+    sup '(Γ, κ0, κ1, τ, e0, e1), {
+      [Γ ⊢ e0 ∈ (κ0 ~ κ1) ;
+       Γ ⊢ e1 ∈ (□ κ0, τ) ]
+      ————
+      Γ ⊢ cast_nec e0 e1 ∈ (□ κ1, τ)
     }
   end.
 
@@ -269,67 +312,210 @@ Example proof_nec_tt v α κ: proof v α [[] ⊢ necessity κ tt ∈ □ κ, uni
   judge_tt # [] ;
   QED.
 
-Record trans v α := trans_intro {
-  from: tm v α;
-  to: tm v α;
+Record heap v α := { top: nat ; read: nat → tm v α ;}.
+Arguments top {v α}.
+Arguments read {v α}.
+
+Definition alloc {v α} (σ: heap v α) (e: tm v α): nat * heap v α :=
+  let ix := top σ in
+  (ix, {| top := S ix ; read n := if Nat.eqb n ix then e else read σ n |}).
+
+Record big v α := big_intro {
+  env: list (v * nat) ;
+  from: heap v α * tm v α;
+  to: heap v α * tm v α;
 }.
-Arguments trans_intro {v α}.
+Arguments big_intro {v α}.
+Arguments env {v α}.
 Arguments from {v α}.
 Arguments to {v α}.
 
-Notation "A ~> B" := (trans_intro A B) (at level 80).
+Notation "s ⊨ A ⇓ B" := (big_intro s A B) (at level 80).
 
 Variant label :=
+| label_var_head
+| label_var_tail
+
+| label_tt
+| label_fanout
+| label_lam
+| label_necessity
+| label_box
+| label_id
+
+| label_app
+| label_bind
+
 | label_π1_fanout
 | label_π2_fanout
 
+| label_nec_comm
+| label_pos_comm
+
+| label_dup
 | label_ext_necessity
 
 | label_compose_id
 | label_sym_id
+
+| label_cast_pos
+| label_cast_nec
 .
 
-Definition reduce v α (l: label): bundle (prop (trans v α)) :=
+Definition reduce v α (l: label): bundle (prop (big v α)) :=
   match l with
-    (* FIXME use one hole contexts? *)
-  | label_ext_necessity =>
-    sup '(κ, e), {
+(* FIXME environment/store is probably all wrong :( *)
+  | label_var_head =>
+    sup '(Γ, σ, x, n), {
       []
       ————
-      ext κ (necessity κ e) ~> e
+      (x, n) :: Γ ⊨ (σ, var x) ⇓ (σ, read σ n)
     }
-  | label_π1_fanout =>
-    sup '(e0, e1), {
-      []
+  | label_var_tail =>
+    sup '(Γ, H, x, σ, e), {
+      [Γ ⊨ (σ, var x) ⇓ (σ, e)]
       ————
-      π1 ⟨e0, e1⟩ ~> e0
-    }
-  | label_π2_fanout =>
-    sup '(e0, e1), {
-      []
-      ————
-      π1 ⟨e0, e1⟩ ~> e0
+      H :: Γ ⊨ (σ, var x) ⇓ (σ, e)
     }
 
-  | label_compose_id =>
-    sup κ, {
+  | label_tt =>
+    sup '(Γ, σ), {
       []
       ————
-      (id κ ∘ id κ) ~> id κ
+      Γ ⊨ (σ, tt) ⇓ (σ, tt)
+    }
+  | label_id =>
+    sup '(Γ, σ, κ), {
+      []
+      ————
+      Γ ⊨ (σ, id κ) ⇓ (σ, id κ)
+    }
+  | label_fanout =>
+    sup '(Γ, σ, e0, e1), {
+      []
+      ————
+      Γ ⊨ (σ, ⟨ e0, e1 ⟩) ⇓ (σ, ⟨ e0 , e1 ⟩)
+    }
+  | label_lam =>
+    sup '(Γ, σ, x, τ, e), {
+      []
+      ————
+      Γ ⊨ (σ, lam x τ e) ⇓ (σ, lam x τ e)
+    }
+  | label_necessity =>
+    sup '(Γ, σ, κ, e), {
+      []
+      ————
+      Γ ⊨ (σ, necessity κ e) ⇓ (σ, necessity κ e)
+    }
+  | label_box =>
+    sup '(Γ, σ, κ, e), {
+      []
+      ————
+      Γ ⊨ (σ, box κ e) ⇓ (σ, box κ e)
+    }
+
+  | label_ext_necessity =>
+    sup '(Γ, σ0, σ1, κ, e0, e1), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1)]
+      ————
+      Γ ⊨ (σ0, ext κ e0) ⇓ (σ1, e1)
+    }
+  | label_dup =>
+    sup '(Γ, σ0, σ1, κ, e0, e1), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1)]
+      ————
+      Γ ⊨ (σ0, dup e0) ⇓ (σ1, necessity κ (necessity κ e1))
+    }
+
+  | label_app =>
+    sup '(Γ, σ0, σ1, σ2, x, τ, e0, e1, e2, e3), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, lam x τ e2) ;
+      (
+        let '(ix, σ1') := alloc σ1 e1 in
+        (x, ix) :: Γ ⊨ (σ1', e2) ⇓ (σ2, e3)
+      )
+      ]
+      ————
+      Γ ⊨ (σ0, app e0 e1) ⇓ (σ2, e3)
+    }
+
+  | label_bind =>
+    sup '(Γ, σ0, σ1, σ2, x, κ, e0, e1, e2, e3), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, box κ e2) ;
+      (
+        let '(ix, σ1') := alloc σ1 e2 in
+        (x, ix) :: Γ ⊨ (σ1', e1) ⇓ (σ2, e3)
+      )
+      ]
+      ————
+      Γ ⊨ (σ0, bind e0 x e1) ⇓ (σ2, e3)
+    }
+
+  | label_π1_fanout =>
+    sup '(Γ, σ0, σ1, e0, e1, e2), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, ⟨e1, e2⟩) ]
+      ————
+      Γ ⊨ (σ0, π1 e0) ⇓ (σ1, e1)
+    }
+  | label_π2_fanout =>
+    sup '(Γ, σ0, σ1, e0, e1, e2), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, ⟨e1, e2⟩) ]
+      ————
+      Γ ⊨ (σ0, π2 e0) ⇓ (σ1, e2)
+    }
+
+  | label_nec_comm =>
+     sup '(Γ, σ0, σ1, κ0, κ1, e0, e1), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ0 (necessity κ1 e1))]
+      ————
+      Γ ⊨ (σ0, nec_comm e0) ⇓ (σ1, necessity κ1 (necessity κ0 e1))
+    }
+  | label_pos_comm =>
+     sup '(Γ, σ0, σ1, κ0, κ1, e0, e1), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, box κ0 (box κ1 e1))]
+      ————
+      Γ ⊨ (σ0, pos_comm e0) ⇓ (σ1, box κ1 (box κ0 e1))
+    }
+
+
+  | label_compose_id =>
+    sup '(Γ, σ0, σ1, σ2, κ, e0, e1), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, id κ); Γ ⊨ (σ1, e1) ⇓ (σ2, id κ)]
+      ————
+      Γ ⊨ (σ0, e0 ∘ e1) ⇓ (σ2, id κ)
     }
 
   | label_sym_id =>
-    sup κ, {
-      []
+    sup '(Γ, σ0, σ1, κ, e), {
+      [Γ ⊨ (σ0, e) ⇓ (σ1, id κ)]
       ————
-      sym (id κ) ~> id κ
+      Γ ⊨ (σ0, sym e) ⇓ (σ1, id κ)
+    }
+
+  | label_cast_pos =>
+    sup '(Γ, σ0, σ1, σ2, κ, e0, e1, e2), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) ;
+       Γ ⊨ (σ1, e1) ⇓ (σ2, box κ e2)
+      ]
+      ————
+      Γ ⊨ (σ0, cast_nec e0 e1) ⇓ (σ2, e2)
+    }
+
+  | label_cast_nec =>
+    sup '(Γ, σ0, σ1, σ2, κ, e0, e1, e2), {
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) ;
+       Γ ⊨ (σ1, e1) ⇓ (σ2, necessity κ e2)
+      ]
+      ————
+      Γ ⊨ (σ0, cast_nec e0 e1) ⇓ (σ2, e2)
     }
   end
 .
 (* Unfortunately seq cannot be the same as proof due to weird
 inference issues *)
 
-Inductive seq v α: list (trans v α) → Type :=
+Inductive seq v α: list (big v α) → Type :=
 | HALT: seq v α []
 | step
     {T}
@@ -345,12 +531,14 @@ Arguments step {v α T}.
 Notation "A @ B ; C" := (step A B C) (at level 60, right associativity,
                                       format "A  @  B  ; '//' C").
 
-Example seq_id v α κ: seq v α [id κ ∘ id κ ~> id κ]
-  :=
-  label_compose_id @ κ ;
+Example seq_id v α κ σ: seq v α [[] ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
+  label_compose_id @ ([], σ,σ,σ, κ, id κ, id κ) ;
+  label_id @ ([], σ, κ) ;
+  label_id @ ([], σ, κ) ;
   HALT.
 
-Example seq_sym v α κ: seq v α [sym (id κ) ~> id κ]
+Example seq_sym v α κ σ: seq v α [[] ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
   :=
-  label_sym_id @ κ ;
+  label_sym_id @ ([], σ, σ, κ, id κ) ;
+  label_id @ ([], σ, κ) ;
   HALT.
