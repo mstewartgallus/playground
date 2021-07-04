@@ -1,6 +1,7 @@
 Require Import Coq.Unicode.Utf8.
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
+Require Import Coq.Vectors.Vector.
 Import IfNotations.
 Import ListNotations.
 Open Scope string_scope.
@@ -70,15 +71,41 @@ Definition ns (A: Type): nat → Type :=
     | O => True
     | S n' => A * loop n'
     end.
-Record ctx α := map {
-  σ: list string ;
-  ty: ns (sort α) (List.length σ);
+
+Record map K V := map_intro {
+  keys: list K ;
+  vals: ns V (List.length keys) ;
 }.
-Arguments map {α}.
-Arguments σ {α}.
-Arguments ty {α}.
-Definition mt {α}: ctx α := map [] I.
-Notation "A |-> B" := (map A B) (at level 30).
+Arguments map_intro {K V}.
+Arguments keys {K V}.
+Arguments vals {K V}.
+
+Notation "A |-> B" := (map_intro A B) (at level 30).
+
+Definition mt {K V}: map K V := [] |-> I.
+Definition put {K V} x v (m: map K V) := (x :: keys m) |-> (v, vals m).
+
+Section lookup.
+  Context {K V: Type}.
+  Variable (eq_dec: ∀ (x0 x1: K), {x0 = x1} + {x0 ≠ x1}).
+
+  #[local]
+  Definition find (x: K) (ks: list K) (vs: ns V (List.length ks)) : option V.
+    induction ks as [|y T].
+    - apply None.
+    - cbn in *.
+      destruct (eq_dec x y).
+      + apply (Some (fst vs)).
+      + apply (IHT (snd vs)).
+  Defined.
+
+  Definition lookup x (Γ: map K V) := find x (keys Γ) (vals Γ).
+End lookup.
+
+Definition ctx α := map string (sort α).
+
+Definition get {α} x (Γ: ctx α) := lookup String.string_dec x Γ.
+
 Record ofty α := ofty_intro {
   Γ: ctx α ;
   e: tm α;
@@ -118,8 +145,7 @@ Arguments tail {A}.
 Notation "P ———— Q" := (impl Q P).
 
 Variant judgement :=
-| judge_var_head
-| judge_var_tail
+| judge_var
 
 | judge_tt
 
@@ -152,20 +178,13 @@ Variant judgement :=
 
 Definition judge α (r: judgement): bundle (prop (ofty α)) :=
   match r with
-  | judge_var_head =>
-    sup '(Γ, x, τ), (
+  | judge_var =>
+    sup '(Γ, x), (
       []
-      ————
-      (x :: σ Γ) |-> (τ, ty Γ) ⊢ var x ∈ τ
+        ————
+        (* Hacky is there a better way ? *)
+      Γ ⊢ var x ∈ if get x Γ is Some τ then τ else unit
     )
-
-  | judge_var_tail =>
-    sup '(y, H, Γ, x, τ), (
-      [Γ ⊢ var x ∈ τ]
-      ————
-      (y :: σ Γ) |-> (H, ty Γ) ⊢ var x ∈ τ
-    )
-
   | judge_tt =>
     sup Γ, (
       []
@@ -193,7 +212,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
 
   | judge_lam =>
     sup '(Γ, τ0, τ1, x, e), (
-      [map (x :: σ Γ) (τ0, ty Γ) ⊢ e ∈ τ1]
+      [ put x τ0 Γ ⊢ e ∈ τ1]
       ————
       Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
     )
@@ -246,7 +265,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
   | judge_bind =>
     sup '(Γ, κ, τ0, τ1, x, e0, e1), (
       [Γ ⊢ e0 ∈ (□ κ, τ0) ;
-      (x :: σ Γ) |-> (τ0, ty Γ) ⊢ e1 ∈ (□ κ, τ1)]
+      put x τ0 Γ ⊢ e1 ∈ (□ κ, τ1)]
       ————
       Γ ⊢ bind e0 x e1 ∈ (□ κ, τ1)
     )
@@ -314,34 +333,21 @@ Example proof_compose α κ: proof α [mt ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
     judge_id # (mt, κ) ;
     QED.
 
-Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]]
-  :=
+Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]] :=
   judge_lam # (mt, A, A, "x", var "x") ;
-  judge_var_head # (mt, "x", A) ;
+  judge_var # (["x"] |-> (A, I), "x") ;
   QED.
 
 Example proof_const α A B: proof α [mt ⊢ lam "x" A (lam "y" B (var "x")) ∈ [A, [B, A]]] :=
   judge_lam # (mt, A, [B, A], "x", lam "y" B (var "x")) ;
-  judge_lam # (_, B, A, "y", var "x") ;
-  judge_var_tail # ("y", B, _, "x", A) ;
-  judge_var_head # (mt, "x", A) ;
+  judge_lam # (["x"] |-> (A, I), B, A, "y", var "x") ;
+  judge_var # (["y" ; "x"] |-> (B, (A, I)), "x") ;
   QED.
 
 Example proof_nec_tt α κ: proof α [mt ⊢ necessity κ tt ∈ □ κ, unit] :=
   judge_necessity # (mt, κ, unit, tt) ;
   judge_tt # mt ;
   QED.
-
-Definition find {α} (x: string) (σ: list string) (Γ: ns (sort α) (List.length σ)) : option (sort α).
-  induction σ as [|y T].
-  - apply None.
-  - cbn in *.
-    case (String.eqb x y).
-    + apply (Some (fst Γ)).
-    + apply (IHT (snd Γ)).
-Defined.
-
-Definition lookup {α} x (Γ: ctx α) := find x (σ Γ) (ty Γ).
 
 Section infer.
   Context {α: Type} (eq_dec: forall (κ0 κ1: α), {κ0 = κ1} + {κ0 ≠ κ1}).
@@ -351,10 +357,10 @@ Section infer.
 
   Fixpoint infer (Γ: ctx α) (e: tm α): option (sort α) :=
     match e with
-    | var x => lookup x Γ
+    | var x => get x Γ
 
     | lam x τ0 e =>
-      match infer ((x :: σ Γ) |-> (τ0, ty Γ)) e with
+      match infer ((x :: keys Γ) |-> (τ0, vals Γ)) e with
       | Some τ1 => Some [τ0, τ1]
       | _ => None
       end
@@ -433,8 +439,10 @@ Definition alloc {α} (σ: heap α) (e: tm α): nat * heap α :=
   let ix := top σ in
   (ix, {| top := S ix ; read n := if Nat.eqb n ix then e else read σ n |}).
 (* FIXME just do the damn substitution *)
+
+Definition environ := map string nat.
 Record big α := big_intro {
-  env: list (string * nat) ;
+  env: environ ;
   from: heap α * tm α;
   to: heap α * tm α;
 }.
@@ -446,8 +454,7 @@ Arguments to {α}.
 Notation "s ⊨ A ⇓ B" := (big_intro s A B) (at level 80).
 
 Variant label :=
-| label_var_head
-| label_var_tail
+| label_var
 
 | label_tt
 | label_fanout
@@ -475,22 +482,19 @@ Variant label :=
 | label_cast_nec
 .
 
+(* Pretty hacky *)
+Definition load x (Γ: environ) :=
+  if lookup String.string_dec x Γ is Some n then n else O.
+
 Definition reduce α (l: label): bundle (prop (big α)) :=
   match l with
 (* FIXME environment/store is probably all wrong :( *)
-  | label_var_head =>
-    sup '(Γ, σ, x, n), (
+  | label_var =>
+    sup '(Γ, σ, x), (
       []
       ————
-      (x, n) :: Γ ⊨ (σ, var x) ⇓ (σ, read σ n)
+      Γ ⊨ (σ, var x) ⇓ (σ, read σ (load x Γ))
     )
-  | label_var_tail =>
-    sup '(Γ, H, x, σ, e), (
-      [Γ ⊨ (σ, var x) ⇓ (σ, e)]
-      ————
-      H :: Γ ⊨ (σ, var x) ⇓ (σ, e)
-    )
-
   | label_tt =>
     sup '(Γ, σ), (
       []
@@ -546,7 +550,7 @@ Definition reduce α (l: label): bundle (prop (big α)) :=
       [Γ ⊨ (σ0, e0) ⇓ (σ1, lam x τ e2) ;
       (
         let '(ix, σ1') := alloc σ1 e1 in
-        (x, ix) :: Γ ⊨ (σ1', e2) ⇓ (σ2, e3)
+        put x ix Γ ⊨ (σ1', e2) ⇓ (σ2, e3)
       )
       ]
       ————
@@ -558,7 +562,7 @@ Definition reduce α (l: label): bundle (prop (big α)) :=
       [Γ ⊨ (σ0, e0) ⇓ (σ1, box κ e2) ;
       (
         let '(ix, σ1') := alloc σ1 e2 in
-        (x, ix) :: Γ ⊨ (σ1', e1) ⇓ (σ2, e3)
+        put x ix Γ ⊨ (σ1', e1) ⇓ (σ2, e3)
       )
       ]
       ————
@@ -644,14 +648,14 @@ Arguments step {α T}.
 Notation "A @ B ; C" := (step A B C) (at level 60, right associativity,
                                       format "A  @  B  ; '//' C").
 
-Example seq_id α κ σ: seq α [[] ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
-  label_compose_id @ ([], σ,σ,σ, κ, id κ, id κ) ;
-  label_id @ ([], σ, κ) ;
-  label_id @ ([], σ, κ) ;
+Example seq_id α κ σ: seq α [mt ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
+  label_compose_id @ (mt, σ,σ,σ, κ, id κ, id κ) ;
+  label_id @ (mt, σ, κ) ;
+  label_id @ (mt, σ, κ) ;
   HALT.
 
-Example seq_sym α κ σ: seq α [[] ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
+Example seq_sym α κ σ: seq α [mt ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
   :=
-  label_sym_id @ ([], σ, σ, κ, id κ) ;
-  label_id @ ([], σ, κ) ;
+  label_sym_id @ (mt, σ, σ, κ, id κ) ;
+  label_id @ (mt, σ, κ) ;
   HALT.
