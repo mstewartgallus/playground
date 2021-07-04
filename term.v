@@ -29,7 +29,7 @@ Reserved Notation "f ∘ g" (at level 30).
 (* Strings are really dumb but I don't want to figure out two things
 at the same time *)
 
-Inductive tm {α} :=
+Inductive tm {α}: Type :=
 | var (x: string)
 
 | lam (x: string) (s: sort α) (e: tm)
@@ -64,15 +64,23 @@ Arguments tm: clear implicits.
 Infix "∘" := compose.
 Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z).
 
-CoInductive stream A := cons { hd: A ; tl: stream A }.
-Arguments cons {A}.
-Arguments hd {A}.
-Arguments tl {A}.
-
-CoFixpoint mt {α} : stream (string * sort α) := cons ("", unit) mt.
-
+Definition ns (A: Type): nat → Type :=
+  fix loop n :=
+    match n with
+    | O => True
+    | S n' => A * loop n'
+    end.
+Record ctx α := map {
+  σ: list string ;
+  ty: ns (sort α) (List.length σ);
+}.
+Arguments map {α}.
+Arguments σ {α}.
+Arguments ty {α}.
+Definition mt {α}: ctx α := map [] I.
+Notation "A |-> B" := (map A B) (at level 30).
 Record ofty α := ofty_intro {
-  Γ: stream (string * sort α) ;
+  Γ: ctx α ;
   e: tm α;
   τ: sort α;
 }.
@@ -148,14 +156,14 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
     sup '(Γ, x, τ), {
       []
       ————
-      cons (x, τ) Γ ⊢ var x ∈ τ
+      (x :: σ Γ) |-> (τ, ty Γ) ⊢ var x ∈ τ
     }
 
   | judge_var_tail =>
-    sup '(H, Γ, x, τ), {
+    sup '(y, H, Γ, x, τ), {
       [Γ ⊢ var x ∈ τ]
       ————
-      cons H Γ ⊢ var x ∈ τ
+      (y :: σ Γ) |-> (H, ty Γ) ⊢ var x ∈ τ
     }
 
   | judge_tt =>
@@ -185,7 +193,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
 
   | judge_lam =>
     sup '(Γ, τ0, τ1, x, e), {
-      [cons (x, τ0) Γ ⊢ e ∈ τ1]
+      [map (x :: σ Γ) (τ0, ty Γ) ⊢ e ∈ τ1]
       ————
       Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
     }
@@ -238,7 +246,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
   | judge_bind =>
     sup '(Γ, κ, τ0, τ1, x, e0, e1), {
       [Γ ⊢ e0 ∈ (□ κ, τ0) ;
-       cons (x, τ0) Γ ⊢ e1 ∈ (□ κ, τ1)]
+      (x :: σ Γ) |-> (τ0, ty Γ) ⊢ e1 ∈ (□ κ, τ1)]
       ————
       Γ ⊢ bind e0 x e1 ∈ (□ κ, τ1)
     }
@@ -314,8 +322,8 @@ Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]]
 
 Example proof_const α A B: proof α [mt ⊢ lam "x" A (lam "y" B (var "x")) ∈ [A, [B, A]]] :=
   judge_lam # (mt, A, [B, A], "x", lam "y" B (var "x")) ;
-  judge_lam # ({| hd := ("x", A); tl := mt |}, B, A, "y", var "x") ;
-  judge_var_tail # ("y", B, {| hd := ("x", A); tl := mt |}, "x", A) ;
+  judge_lam # (_, B, A, "y", var "x") ;
+  judge_var_tail # ("y", B, _, "x", A) ;
   judge_var_head # (mt, "x", A) ;
   QED.
 
