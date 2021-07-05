@@ -516,8 +516,57 @@ Section infer.
 
   Theorem infer_complete Γ e τ :
     Γ ⊢ e ∈ τ → infer Γ e = Some τ.
-    admit.
-  Admitted.
+    intro p.
+    induction p.
+    all: cbn in *.
+    all: auto.
+    - rewrite IHp1, IHp2.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp1, IHp2.
+      destruct (sort_eq τ0 τ0).
+      2: contradiction.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp.
+      destruct (eq_dec κ κ).
+      2: contradiction.
+      reflexivity.
+    - rewrite IHp.
+      destruct (eq_dec κ κ).
+      2: contradiction.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp1, IHp2.
+      destruct (eq_dec κ κ).
+      2: contradiction.
+      reflexivity.
+    - rewrite IHp1, IHp2.
+      destruct (eq_dec κ1 κ1).
+      2: contradiction.
+      reflexivity.
+    - rewrite IHp.
+      reflexivity.
+    - rewrite IHp1, IHp2.
+      destruct (eq_dec κ0 κ0).
+      2: contradiction.
+      reflexivity.
+    - rewrite IHp1, IHp2.
+      destruct (eq_dec κ0 κ0).
+      2: contradiction.
+      reflexivity.
+  Qed.
 End infer.
 
 Record heap α := { top: nat ; read: nat → tm α ;}.
