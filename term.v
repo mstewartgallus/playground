@@ -102,73 +102,73 @@ Definition add {α} x τ (m: ctx α): ctx α := λ y, if string_dec x y then Som
 
 Reserved Notation "Γ ⊢ e ∈ τ" (at level 80).
 
-Inductive judge {α}: ctx α → tm α → sort α → Type :=
-| judge_var Γ x τ:
+Inductive judge {α} (Γ: ctx α): tm α → sort α → Type :=
+| judge_var x τ:
     Γ x = Some τ →
     Γ ⊢ var x ∈ τ
 
-| judge_tt Γ:
+| judge_tt:
     Γ ⊢ tt ∈ unit
-| judge_fanout Γ e0 e1 τ0 τ1:
+| judge_fanout e0 e1 τ0 τ1:
     Γ ⊢ e0 ∈ τ0 → Γ ⊢ e1 ∈ τ1 →
     Γ ⊢ fanout e0 e1 ∈ (τ0 × τ1)
 
-| judge_π1 Γ e τ0 τ1:
+| judge_π1 e τ0 τ1:
     Γ ⊢ e ∈ (τ0 × τ1) →
     Γ ⊢ π1 e ∈ τ0
-| judge_π2 Γ e τ0 τ1:
+| judge_π2 e τ0 τ1:
     Γ ⊢ e ∈ (τ0 × τ1) →
     Γ ⊢ π2 e ∈ τ1
 
-| judge_lam Γ e τ0 τ1 x:
+| judge_lam e τ0 τ1 x:
     add x τ0 Γ ⊢ e ∈ τ1 →
     Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
-| judge_app Γ e0 e1 τ0 τ1:
+| judge_app e0 e1 τ0 τ1:
     Γ ⊢ e0 ∈ [τ0, τ1] → Γ ⊢ e1 ∈ τ0 →
     Γ ⊢ app e0 e1 ∈ τ1
 
-| judge_necessity Γ κ e τ:
+| judge_necessity κ e τ:
     mt ⊢ e ∈ τ →
     Γ ⊢ necessity κ e ∈ (□ κ, τ)
-| judge_nec_comm Γ κ0 κ1 e τ:
+| judge_nec_comm κ0 κ1 e τ:
     Γ ⊢ e ∈ (□ κ0, □ κ1, τ) →
     Γ ⊢ nec_comm e ∈ (□ κ1, □ κ0, τ)
 
-| judge_ext Γ κ e τ:
+| judge_ext κ e τ:
     Γ ⊢ e ∈ (□ κ, τ) →
     Γ ⊢ ext κ e ∈ τ
-| judge_dup Γ κ e τ:
+| judge_dup κ e τ:
     Γ ⊢ e ∈ (□ κ, τ) →
     Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
 
-| judge_pos_comm Γ κ0 κ1 e τ:
+| judge_pos_comm κ0 κ1 e τ:
     Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ) →
     Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
 
-| judge_box Γ κ e τ:
+| judge_box κ e τ:
     Γ ⊢ e ∈ τ →
     Γ ⊢ box κ e ∈ (◇ κ, τ)
 
-| judge_bind Γ e0 e1 x κ τ0 τ1:
+| judge_bind e0 e1 x κ τ0 τ1:
     Γ ⊢ e0 ∈ (◇ κ, τ0) → add x τ0 Γ ⊢ e1 ∈ (◇ κ, τ1) →
     Γ ⊢ bind e0 x e1 ∈ (◇ κ, τ1)
 
-| judge_id Γ κ:
+| judge_id κ:
     Γ ⊢ id κ ∈ (κ ~ κ)
 
-| judge_compose Γ e0 e1 κ0 κ1 κ2:
+| judge_compose e0 e1 κ0 κ1 κ2:
     Γ ⊢ e0 ∈ (κ1 ~ κ2) → Γ ⊢ e1 ∈ (κ0 ~ κ1) →
     Γ ⊢ (e0 ∘ e1) ∈ (κ0 ~ κ2)
 
-| judge_sym Γ e κ0 κ1:
+| judge_sym e κ0 κ1:
     Γ ⊢ e ∈ (κ1 ~ κ0) →
     Γ ⊢ sym e ∈ (κ0 ~ κ1)
 
 (* Really unsure of these as faithful to cylindrical logic *)
-| judge_cast_pos Γ e0 e1 κ0 κ1 τ:
+| judge_cast_pos e0 e1 κ0 κ1 τ:
       Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (◇ κ0, τ) →
       Γ ⊢ cast_pos e0 e1 ∈ (◇ κ1, τ)
-| judge_cast_nec Γ e0 e1 κ0 κ1 τ:
+| judge_cast_nec e0 e1 κ0 κ1 τ:
     Γ ⊢ e0 ∈ (κ0 ~ κ1) →
     Γ ⊢ e1 ∈ (□ κ0, τ) →
     Γ ⊢ cast_nec e0 e1 ∈ (□ κ1, τ)
@@ -569,95 +569,145 @@ Section infer.
   Qed.
 End infer.
 
-Record heap α := { top: nat ; read: nat → tm α ;}.
-Arguments top {α}.
-Arguments read {α}.
+Variant whnf {α}: tm α → Type :=
+| whnf_tt: whnf tt
+| whnf_fanout e0 e1: whnf (fanout e0 e1)
+| whnf_lam x τ e: whnf (lam x τ e)
+| whnf_box κ e: whnf (box κ e)
+| whnf_nec κ e: whnf (necessity κ e)
+| whnf_id κ: whnf (id κ)
+.
 
-Definition alloc {α} (σ: heap α) (e: tm α): nat * heap α :=
-  let ix := top σ in
-  (ix, {| top := S ix ; read n := if Nat.eqb n ix then e else read σ n |}).
-(* FIXME just do the damn substitution *)
+Reserved Notation "'[' x ':=' s ']' t" (at level 20).
+
+Fixpoint subst {α} (x : string) (s : tm α) (ev : tm α) : tm α :=
+  match ev with
+  | var y =>
+    if string_dec x y
+    then s
+    else ev
+
+  | lam y τ e =>
+    if string_dec x y
+    then ev
+    else lam y τ ([x := s] e)
+  | bind e0 y e1 =>
+    bind ([x := s] e0) y (if string_dec x y then e1 else [x := s] e1)
+
+  | tt => tt
+
+  | app e0 e1 => app ([x:=s] e0) ([x:=s] e1)
+
+  | fanout e0 e1 => fanout ([x:=s] e0) ([x:=s] e1)
+  | π1 e => π1 ([x:=s] e)
+  | π2 e => π2 ([x:=s] e)
+
+  | necessity κ e => necessity κ ([x:=s] e)
+  | nec_comm e => nec_comm ([x:=s] e)
+
+  | ext κ e => ext κ ([x:=s] e)
+  | dup e => dup ([x:=s] e)
+
+  | pos_comm e => pos_comm ([x:=s] e)
+  | box κ e => box κ ([x:=s] e)
+
+  | id κ => id κ
+  | e0 ∘ e1 => ([x:=s] e0) ∘ ([x:=s] e1)
+  | sym e => sym ([x:=s] e)
+
+  | cast_pos e0 e1 => cast_pos ([x:=s] e0) ([x:=s] e1)
+  | cast_nec e0 e1 => cast_nec ([x:=s] e0) ([x:=s] e1)
+  end
+where "'[' x ':=' s ']' t" := (subst x s t) .
+
+Theorem subst_type {α} Γ x τ2 (e0 e1: tm α) τ0 τ1:
+  add x τ2 Γ ⊢ e0 ∈ τ0 →
+  mt ⊢ e1 ∈ τ1 →
+  Γ ⊢ [x:=e1]e0 ∈ τ0.
+Proof.
+  intros p q.
+  generalize dependent Γ.
+  generalize dependent τ0.
+  induction e0.
+  all: intros.
+  all: cbn in *.
+  - destruct (string_dec x x0).
+    + subst.
+Admitted.
+
+Reserved Notation "t '-->' t'" (at level 40).
+
+Inductive step {α} : tm α → tm α → Prop :=
+  | step_app_lam x τ e0 e1:
+      app (lam x τ e0) e1 --> [x:=e1]e0
+  | step_bind_box κ e0 x e1:
+      bind (box κ e0) x e1 --> [x:=e0]e1
+
+  | step_π1_fanout e0 e1:
+      π1 (fanout e0 e1) --> e0
+  | step_π2_fanout e0 e1:
+      π2 (fanout e0 e1) --> e1
+
+  | step_ext_necessity κ e:
+      ext κ (necessity κ e) --> e
+  | step_dup_necessity κ e:
+      ext κ (necessity κ e) --> necessity κ (necessity κ e)
+
+  | step_sym_id κ:
+      sym (id κ) --> id κ
+  | step_compose_id κ:
+      id κ ∘ id κ --> id κ
+
+  | step_cast_pos_id_box κ e:
+      cast_pos (id κ) (box κ e) --> box κ e
+  | step_cast_nec_id_box κ e:
+      cast_nec (id κ) (necessity κ e) --> necessity κ e
+
+  | step_app e0 e0' e1:
+      e0 --> e0' →
+      app e0 e1 --> app e0' e1
+  | step_π1 e e':
+      e --> e' →
+      π1 e --> π1 e'
+  | step_π2 e e':
+      e --> e' →
+      π2 e --> π2 e'
+
+  | step_ext κ e e':
+      e --> e' →
+      ext κ e --> ext κ e'
+  | step_dup e e':
+      e --> e' →
+      dup e --> dup e'
+
+  | step_pos_comm e e':
+      e --> e' →
+      pos_comm e --> pos_comm e'
+
+  | step_nec_comm e e':
+      e --> e' →
+      nec_comm e --> nec_comm e'
+
+  | step_compose_l e0 e0' e1:
+      e0 --> e0' →
+      e0 ∘ e1 --> e0' ∘ e1
+  | step_compose_r e0 e1 e1':
+      e1 --> e1' →
+      e0 ∘ e1 --> e0 ∘ e1'
+
+  | step_cast_pos_l e0 e1 e0':
+      e0 --> e0' →
+      cast_pos e0 e1 --> cast_pos e0' e1
+  | step_cast_pos_r e0 e1 e1':
+      e1 --> e1' →
+      cast_pos e0 e1 --> cast_pos e0 e1'
 
 
-Reserved Notation "s ⊨ A ⇓ B"  (at level 80).
+  | step_cast_nec_l e0 e1 e0':
+      e0 --> e0' →
+      cast_nec e0 e1 --> cast_nec e0' e1
+  | step_cast_nec_r e0 e1 e1':
+      e1 --> e1' →
+      cast_nec e0 e1 --> cast_nec e0 e1'
 
-(* pretty hacky *)
-Definition load (x: string) (Γ: F.t nat): nat :=
-  if F.find x Γ is Some n then n else O.
-
-Inductive big {α}: F.t nat → heap α * tm α → heap α * tm α → Type :=
-  (* FIXME environment/store is probably all wrong :( *)
-| big_var Γ σ x: Γ ⊨ (σ, var x) ⇓ (σ, read σ (load x Γ))
-
-| big_tt Γ σ:
-    Γ ⊨ (σ, tt) ⇓ (σ, tt)
-
-| big_id Γ σ κ:
-    Γ ⊨ (σ, id κ) ⇓ (σ, id κ)
-
-| big_fanout Γ σ e0 e1:
-  Γ ⊨ (σ, fanout e0 e1) ⇓ (σ, fanout e0 e1)
-
-| big_lam Γ σ x τ e:
-  Γ ⊨ (σ, lam x τ e) ⇓ (σ, lam x τ e)
-
-| big_necessity Γ σ κ e:
-    Γ ⊨ (σ, necessity κ e) ⇓ (σ, necessity κ e)
-
-| big_box Γ σ κ e:
-    Γ ⊨ (σ, box κ e) ⇓ (σ, box κ e)
-
-| big_ext_necessity Γ σ0 σ1 κ e0 e1:
-      Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1) →
-      Γ ⊨ (σ0, ext κ e0) ⇓ (σ1, e1)
-
-| big_dup Γ σ0 σ1 κ e0 e1:
-      Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1) →
-      Γ ⊨ (σ0, dup e0) ⇓ (σ1, necessity κ (necessity κ e1))
-
-| big_app Γ σ0 σ1 σ2 x τ e0 e1 e2 e3:
-    Γ ⊨ (σ0, e0) ⇓ (σ1, lam x τ e2) →
-    (let '(ix, σ1') := alloc σ1 e1 in
-    F.add x ix Γ ⊨ (σ1', e2) ⇓ (σ2, e3)) →
-    Γ ⊨ (σ0, app e0 e1) ⇓ (σ2, e3)
-
-| big_bind Γ σ0 σ1 σ2 x κ e0 e1 e2 e3:
-      (Γ ⊨ (σ0, e0) ⇓ (σ1, box κ e2)) →
-      (let '(ix, σ1') := alloc σ1 e2 in
-       F.add x ix Γ ⊨ (σ1', e1) ⇓ (σ2, e3)) →
-      Γ ⊨ (σ0, bind e0 x e1) ⇓ (σ2, e3)
-
-| big_π1_fanout Γ σ0 σ1 e0 e1 e2:
-      Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) →
-      Γ ⊨ (σ0, π1 e0) ⇓ (σ1, e1)
-
-| big_π2_fanout Γ σ0 σ1 e0 e1 e2:
-    Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) →
-    Γ ⊨ (σ0, π2 e0) ⇓ (σ1, e2)
-
-| big_nec_comm Γ σ0 σ1 κ0 κ1 e0 e1:
-      Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ0 (necessity κ1 e1)) →
-      Γ ⊨ (σ0, nec_comm e0) ⇓ (σ1, necessity κ1 (necessity κ0 e1))
-| big_pos_comm Γ σ0 σ1 κ0 κ1 e0 e1:
-      Γ ⊨ (σ0, e0) ⇓ (σ1, box κ0 (box κ1 e1)) →
-      Γ ⊨ (σ0, pos_comm e0) ⇓ (σ1, box κ1 (box κ0 e1))
-
-| big_compose_id Γ σ0 σ1 σ2 κ e0 e1:
-      Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) → Γ ⊨ (σ1, e1) ⇓ (σ2, id κ) →
-      Γ ⊨ (σ0, e0 ∘ e1) ⇓ (σ2, id κ)
-
-| big_sym_id Γ σ0 σ1 κ e:
-    Γ ⊨ (σ0, e) ⇓ (σ1, id κ) →
-    Γ ⊨ (σ0, sym e) ⇓ (σ1, id κ)
-
-| big_cast_nec Γ σ0 σ1 σ2 κ e0 e1 e2:
-    Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) →
-    Γ ⊨ (σ1, e1) ⇓ (σ2, necessity κ e2) →
-    Γ ⊨ (σ0, cast_nec e0 e1) ⇓ (σ2, necessity κ e2)
-
-| big_cast_pos Γ σ0 σ1 σ2 κ e0 e1 e2:
-    Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) →
-    Γ ⊨ (σ1, e1) ⇓ (σ2, box κ e2) →
-    Γ ⊨ (σ0, cast_pos e0 e1) ⇓ (σ2, box κ e2)
-where "s ⊨ A ⇓ B" := (big s A B).
-
+where "t '-->' t'" := (step t t').
