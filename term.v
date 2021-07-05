@@ -100,253 +100,79 @@ Definition ctx α := string → option (sort α).
 Definition mt {α}: ctx α := λ _, None.
 Definition add {α} x τ (m: ctx α): ctx α := λ y, if string_dec x y then Some τ else m y.
 
-Record ofty α := ofty_intro {
-  Γ: ctx α;
-  e: tm α;
-  τ: sort α;
-}.
-Arguments ofty_intro {α}.
-Arguments Γ {α}.
-Arguments e {α}.
-Arguments τ {α}.
-Notation "Γ ⊢ e ∈ τ" := (ofty_intro Γ e τ) (at level 80).
+Reserved Notation "Γ ⊢ e ∈ τ" (at level 80).
 
-Record bundle A := sup {
-  s: Type ;
-  π: s → A ;
-}.
-Arguments sup {A}.
-Arguments π {A}.
+Inductive judge {α}: ctx α → tm α → sort α → Type :=
+| judge_var Γ x τ:
+    Γ x = Some τ →
+    Γ ⊢ var x ∈ τ
 
-Coercion s: bundle >-> Sortclass.
+| judge_tt Γ:
+    Γ ⊢ tt ∈ unit
+| judge_fanout Γ e0 e1 τ0 τ1:
+    Γ ⊢ e0 ∈ τ0 → Γ ⊢ e1 ∈ τ1 →
+    Γ ⊢ fanout e0 e1 ∈ (τ0 × τ1)
 
-Notation "'sup' x .. y , P" := {| π x := .. {| π y := P |} .. |}
-  (at level 200, x binder, y binder, right associativity,
-  format "'[ ' '[ ' 'sup'  x .. y ']' , '/' P ']'").
+| judge_π1 Γ e τ0 τ1:
+    Γ ⊢ e ∈ (τ0 × τ1) →
+    Γ ⊢ π1 e ∈ τ0
+| judge_π2 Γ e τ0 τ1:
+    Γ ⊢ e ∈ (τ0 × τ1) →
+    Γ ⊢ π2 e ∈ τ1
 
+| judge_lam Γ e τ0 τ1 x:
+    add x τ0 Γ ⊢ e ∈ τ1 →
+    Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
+| judge_app Γ e0 e1 τ0 τ1:
+    Γ ⊢ e0 ∈ [τ0, τ1] → Γ ⊢ e1 ∈ τ0 →
+    Γ ⊢ app e0 e1 ∈ τ1
 
-Reserved Notation "P ———— Q" (at level 90, format "'//' P '//' ———— '//' Q").
+| judge_necessity Γ κ e τ:
+    mt ⊢ e ∈ τ →
+    Γ ⊢ necessity κ e ∈ (□ κ, τ)
+| judge_nec_comm Γ κ0 κ1 e τ:
+    Γ ⊢ e ∈ (□ κ0, □ κ1, τ) →
+    Γ ⊢ nec_comm e ∈ (□ κ1, □ κ0, τ)
 
-Record prop A :=
-  impl {
-      consequent: A ;
-      antecedent: list A ;
-    }.
-Arguments impl {A}.
-Arguments consequent {A}.
-Arguments antecedent {A}.
+| judge_ext Γ κ e τ:
+    Γ ⊢ e ∈ (□ κ, τ) →
+    Γ ⊢ ext κ e ∈ τ
+| judge_dup Γ κ e τ:
+    Γ ⊢ e ∈ (□ κ, τ) →
+    Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
 
-Notation "P ———— Q" := (impl Q P).
+| judge_pos_comm Γ κ0 κ1 e τ:
+    Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ) →
+    Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
 
-Variant judgement :=
-| judge_var
+| judge_box Γ κ e τ:
+    Γ ⊢ e ∈ τ →
+    Γ ⊢ box κ e ∈ (◇ κ, τ)
 
-| judge_tt
+| judge_bind Γ e0 e1 x κ τ0 τ1:
+    Γ ⊢ e0 ∈ (◇ κ, τ0) → add x τ0 Γ ⊢ e1 ∈ (◇ κ, τ1) →
+    Γ ⊢ bind e0 x e1 ∈ (◇ κ, τ1)
 
-| judge_fanout
-| judge_fst
-| judge_snd
+| judge_id Γ κ:
+    Γ ⊢ id κ ∈ (κ ~ κ)
 
-| judge_lam
-| judge_app
+| judge_compose Γ e0 e1 κ0 κ1 κ2:
+    Γ ⊢ e0 ∈ (κ1 ~ κ2) → Γ ⊢ e1 ∈ (κ0 ~ κ1) →
+    Γ ⊢ (e0 ∘ e1) ∈ (κ0 ~ κ2)
 
-| judge_necessity
+| judge_sym Γ e κ0 κ1:
+    Γ ⊢ e ∈ (κ1 ~ κ0) →
+    Γ ⊢ sym e ∈ (κ0 ~ κ1)
 
-| judge_nec_comm
-
-| judge_ext
-| judge_dup
-
-| judge_pos_comm
-
-| judge_box
-| judge_bind
-
-| judge_id
-| judge_compose
-| judge_sym
-
-| judge_cast_nec
-| judge_cast_pos
-.
-
-(* A bit of a hack tbh *)
-Variant inmap α := imap (Γ: ctx α) (x: string) (τ: sort α) (p: Γ x = Some τ).
-Arguments imap {α}.
-
-Definition judge α (r: judgement): bundle (prop (ofty α)) :=
-  match r with
-  | judge_var =>
-    sup '(imap Γ x τ _), (
-      []
-      ————
-      Γ ⊢ var x ∈ τ
-    )
-  | judge_tt =>
-    sup Γ, (
-      []
-      ————
-      Γ ⊢ tt ∈ unit
-    )
-  | judge_fanout =>
-    sup '(Γ, τ0, τ1, e0, e1), (
-      [ Γ ⊢ e0 ∈ τ0 ; Γ ⊢ e1 ∈ τ1]
-      ————
-      Γ ⊢ fanout e0 e1 ∈ (τ0 × τ1)
-    )
-  | judge_fst =>
-    sup '(Γ, τ0, τ1, e), (
-      [Γ ⊢ e ∈ (τ0 × τ1) ]
-      ————
-      Γ ⊢ π1 e ∈ τ0
-    )
-  | judge_snd =>
-    sup '(Γ, τ0, τ1, e), (
-      [Γ ⊢ e ∈ (τ0 × τ1)]
-      ————
-      Γ ⊢ π2 e ∈ τ1
-    )
-
-  | judge_lam =>
-    sup '(Γ, τ0, τ1, x, e), (
-      [add x τ0 Γ ⊢ e ∈ τ1]
-      ————
-      Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
-    )
-  | judge_app =>
-    sup '(Γ, τ0, τ1, e0, e1), (
-      [Γ ⊢ e0 ∈ [τ0, τ1]; Γ ⊢ e1 ∈ τ0]
-      ————
-      Γ ⊢ app e0 e1 ∈ τ1
-    )
-
-  | judge_necessity =>
-    sup '(Γ, κ, τ, e), (
-      [mt ⊢ e ∈ τ]
-      ————
-      Γ ⊢ necessity κ e ∈ (□ κ, τ)
-    )
-  | judge_nec_comm =>
-    sup '(Γ, κ0, κ1, τ, e), (
-      [Γ ⊢ e ∈ (□ κ1, □ κ0, τ)]
-      ————
-      Γ ⊢ nec_comm e ∈ (□ κ1, □ κ0, τ)
-    )
-
-  | judge_ext =>
-    sup '( κ, τ, e, Γ ), (
-      [Γ ⊢ e ∈ (□ κ, τ)]
-      ————
-      Γ ⊢ ext κ e ∈ τ
-    )
-  | judge_dup =>
-    sup '( Γ, κ, τ, e ), (
-      [Γ ⊢ e ∈ (□ κ, τ)]
-      ————
-      Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
-    )
-
-  | judge_pos_comm =>
-    sup '( κ0, κ1, τ, e, Γ ), (
-      [Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ)]
-      ————
-      Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
-    )
-
-  | judge_box =>
-    sup '(Γ, κ, τ, e), (
-      [Γ ⊢ e ∈ τ]
-      ————
-      Γ ⊢ box κ e ∈ (□ κ, τ)
-    )
-  | judge_bind =>
-    sup '(Γ, κ, τ0, τ1, x, e0, e1), (
-      [Γ ⊢ e0 ∈ (□ κ, τ0) ;
-      add x τ0 Γ ⊢ e1 ∈ (□ κ, τ1)]
-      ————
-      Γ ⊢ bind e0 x e1 ∈ (□ κ, τ1)
-    )
-
-  | judge_id =>
-    sup '( Γ, κ), (
-      []
-      ————
-      Γ ⊢ id κ ∈ (κ ~ κ)
-    )
-  | judge_compose =>
-    sup '(Γ, κ0, κ1, κ2, e0, e1), (
-      [Γ ⊢ e0 ∈ (κ1 ~ κ2) ; Γ ⊢ e0 ∈ (κ0 ~ κ1) ]
-      ————
-      Γ ⊢ (e0 ∘ e1) ∈ (κ0 ~ κ2)
-    )
-  | judge_sym =>
-    sup '(Γ, e, κ0, κ1), (
-      [Γ ⊢ e ∈ (κ0 ~ κ1) ]
-      ————
-      Γ ⊢ sym e ∈ (κ1 ~ κ0)
-    )
-
-  (* Really unsure of these as faithful to cylindrical logic *)
-  | judge_cast_pos =>
-    sup '(Γ, κ0, κ1, τ, e0, e1), (
-      [Γ ⊢ e0 ∈ (κ0 ~ κ1) ;
-       Γ ⊢ e1 ∈ (◇ κ0, τ) ]
-      ————
+(* Really unsure of these as faithful to cylindrical logic *)
+| judge_cast_pos Γ e0 e1 κ0 κ1 τ:
+      Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (◇ κ0, τ) →
       Γ ⊢ cast_pos e0 e1 ∈ (◇ κ1, τ)
-    )
-  | judge_cast_nec =>
-    sup '(Γ, κ0, κ1, τ, e0, e1), (
-      [Γ ⊢ e0 ∈ (κ0 ~ κ1) ;
-       Γ ⊢ e1 ∈ (□ κ0, τ) ]
-      ————
-      Γ ⊢ cast_nec e0 e1 ∈ (□ κ1, τ)
-    )
-  end.
-
-Inductive proof α: list (ofty α) → Type :=
-| QED: proof α []
-| andso
-    {T}
-    (r: judgement)
-    (s: judge α r)
-  :
-    proof α (antecedent (π (judge α r) s) ++ T) →
-    proof α (consequent (π (judge α r) s) :: T).
-
-Arguments QED {α}.
-Arguments andso {α T} r s &.
-
-Notation "A # B ; C" := (andso A B C) (at level 60, right associativity,
-                                      format "A  #  B  ; '//' C").
-
-Example proof_tt α: proof α [mt ⊢ tt ∈ unit] :=
-  judge_tt # _ ;
-  QED.
-
-Example proof_compose α κ: proof α [mt ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
-  :=
-    judge_compose # (mt, κ, κ, κ, id κ, id κ) ;
-    judge_id # (mt, κ) ;
-    judge_id # (mt, κ) ;
-    QED.
-
-#[program]
-Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]] :=
-  judge_lam # (mt, A, A, "x", var "x") ;
-  judge_var # imap _ "x" _  _ ;
-  QED.
-
-#[program]
-Example proof_const α A B: proof α [mt ⊢ lam "x" A (lam "y" B (var "x")) ∈ [A, [B, A]]] :=
-  judge_lam # (mt, A, [B, A], "x", lam "y" B (var "x")) ;
-  judge_lam # (_, B, A, "y", var "x") ;
-  judge_var # imap _ "x" _ _ ;
-  QED.
-
-Example proof_nec_tt α κ: proof α [mt ⊢ necessity κ tt ∈ □ κ, unit] :=
-  judge_necessity # (mt, κ, unit, tt) ;
-  judge_tt # mt ;
-  QED.
+| judge_cast_nec Γ e0 e1 κ0 κ1 τ:
+    Γ ⊢ e0 ∈ (κ0 ~ κ1) →
+    Γ ⊢ e1 ∈ (□ κ0, τ) →
+    Γ ⊢ cast_nec e0 e1 ∈ (□ κ1, τ)
+where "Γ ⊢ e ∈ τ" := (judge Γ e τ).
 
 Section infer.
   Context {α: Type} (eq_dec: forall (κ0 κ1: α), {κ0 = κ1} + {κ0 ≠ κ1}).
@@ -356,18 +182,18 @@ Section infer.
     decide equality.
   Defined.
 
-  Fixpoint infer (e: tm α) (Γ: ctx α): option (sort α) :=
+  Fixpoint infer (Γ: ctx α) (e: tm α): option (sort α) :=
     match e with
     | var x => Γ x
 
     | lam x τ0 e =>
-      match infer e (add x τ0 Γ) with
+      match infer (add x τ0 Γ) e with
       | Some τ1 => Some [τ0, τ1]
       | _ => None
       end
 
     | app e0 e1 =>
-      match (infer e0 Γ, infer e1 Γ) with
+      match (infer Γ e0, infer Γ e1) with
       | (Some [τ0, τ1], Some τ0') =>
         if sort_eq τ0 τ0' then
           Some τ1
@@ -379,62 +205,62 @@ Section infer.
     | tt => Some unit
 
     | fanout e0 e1 =>
-      match (infer e0 Γ, infer e1 Γ) with
-      | (Some τ0, Some τ1) => Some (prod τ0 τ1)
+      match (infer Γ e0, infer Γ e1) with
+      | (Some τ0, Some τ1) => Some (τ0 × τ1)
       | _ => None
       end
 
     | π1 e =>
-      match infer e Γ with
-      | Some (prod τ0 τ1) => Some τ0
+      match infer Γ e with
+      | Some (τ0 × τ1) => Some τ0
       | _ => None
       end
 
     | π2 e =>
-      match infer e Γ with
-      | Some (prod τ0 τ1) => Some τ1
+      match infer Γ e with
+      | Some (τ0 × τ1) => Some τ1
       | _ => None
       end
 
     | necessity κ e =>
-      match infer e mt with
+      match infer mt e with
       | Some τ => Some (□ κ, τ)
       | _ => None
       end
     | nec_comm e =>
-      match infer e Γ with
+      match infer Γ e with
       | Some (□ κ0, □ κ1, τ) => Some (□ κ1, □ κ0, τ)
       | _ => None
       end
 
     | ext κ e =>
-      match infer e Γ with
+      match infer Γ e with
       | Some (□ κ', τ) =>
         if eq_dec κ κ' then Some τ else None
       | _ => None
       end
     | dup e =>
-      match infer e Γ with
+      match infer Γ e with
       | Some (□ κ, τ) => Some (□ κ, □ κ, τ)
       | _ => None
       end
 
     | pos_comm e =>
-      match infer e Γ with
+      match infer Γ e with
       | Some (◇ κ0, ◇ κ1, τ) => Some (◇ κ1, ◇ κ0, τ)
       | _ => None
       end
 
     | box κ e =>
-      match infer e Γ with
+      match infer Γ e with
       | Some τ => Some (◇ κ, τ)
       | _ => None
       end
 
     | bind e0 x e1 =>
-      match infer e0 Γ with
+      match infer Γ e0 with
       | Some (◇ κ0, τ0) =>
-        match infer e1 (add x τ0 Γ) with
+        match infer (add x τ0 Γ) e1 with
         | Some (◇ κ1, τ1) =>
           if eq_dec κ0 κ1 then Some (◇ κ1, τ1) else None
         | _ => None
@@ -444,28 +270,28 @@ Section infer.
 
     | id κ => Some (κ ~ κ)
     | e0 ∘ e1 =>
-      match (infer e0 Γ, infer e1 Γ) with
+      match (infer Γ e0, infer Γ e1) with
       | (Some (κ1 ~ κ2), Some (κ0 ~ κ1')) =>
         if eq_dec κ1 κ1' then Some (κ0 ~ κ2) else None
       | _ => None
       end
 
     | sym e =>
-      match infer e Γ with
+      match infer Γ e with
       | Some (κ0 ~ κ1) => Some (κ1 ~ κ0)
       | _ => None
       end
 
 
     | cast_pos e0 e1 =>
-      match (infer e0 Γ, infer e1 Γ) with
+      match (infer Γ e0, infer Γ e1) with
       | (Some (κ0 ~ κ1), Some (◇ κ0', τ)) =>
         if eq_dec κ0 κ0' then Some (◇ κ1, τ) else None
       | _ => None
       end
 
     | cast_nec e0 e1 =>
-      match (infer e0 Γ, infer e1 Γ) with
+      match (infer Γ e0, infer Γ e1) with
       | (Some (κ0 ~ κ1), Some (□ κ0', τ)) =>
         if eq_dec κ0 κ0' then Some (□ κ1, τ) else None
       | _ => None
@@ -473,17 +299,223 @@ Section infer.
     end.
 
   Theorem infer_sound Γ e τ:
-    infer e Γ = Some τ → proof α [Γ ⊢ e ∈ τ].
+    infer Γ e = Some τ → Γ ⊢ e ∈ τ.
   Proof.
-    intro p.
+    generalize dependent Γ.
+    generalize dependent τ.
     induction e.
+    all: intros τ Γ p.
     all: cbn in *.
-    - apply (judge_var # imap Γ x τ p ; QED).
-    - admit.
-  Admitted.
+    - apply judge_var.
+      assumption.
+    - destruct (infer (add x s Γ) e) eqn:q.
+      2: discriminate.
+      inversion p.
+      subst.
+      apply judge_lam.
+      apply IHe.
+      apply q.
+    - destruct (infer Γ e1) eqn:q1.
+      2: discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (infer Γ e2) eqn:q2.
+      all: try discriminate.
+      destruct (sort_eq s1 s).
+      all: try discriminate.
+      inversion p.
+      subst.
+      eapply judge_app.
+      Unshelve.
+      3: apply s.
+      + apply IHe1.
+        apply q1.
+      + apply IHe2.
+        apply q2.
+    - inversion p.
+      subst.
+      apply judge_tt.
+    - destruct (infer Γ e1) eqn:q1.
+      all: try discriminate.
+      destruct (infer Γ e2) eqn:q2.
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_fanout.
+      + apply IHe1.
+        assumption.
+      + apply IHe2.
+        assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      eapply judge_π1.
+      Unshelve.
+      2: apply s2.
+      inversion p.
+      subst.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      eapply judge_π2.
+      Unshelve.
+      2: apply s1.
+      inversion p.
+      subst.
+      apply IHe.
+      assumption.
+    - destruct (infer mt e) eqn:q.
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_necessity.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_nec_comm.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (eq_dec κ κ0).
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_ext.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_dup.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_pos_comm.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_box.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e1) eqn:q1.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (infer (add x s Γ) e2) eqn:q2.
+      all: try discriminate.
+      destruct s0.
+      all: try discriminate.
+      destruct (eq_dec κ κ0).
+      all: try discriminate.
+      inversion p.
+      subst.
+      eapply judge_bind.
+      Unshelve.
+      3: apply s.
+      + apply IHe1.
+        assumption.
+      + apply IHe2.
+        assumption.
+    - inversion p.
+      subst.
+      apply judge_id.
+    - destruct (infer Γ e1) eqn:q1.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (infer Γ e2) eqn:q2.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (eq_dec κ μ0).
+      all: try discriminate.
+      inversion p.
+      subst.
+      eapply judge_compose.
+      Unshelve.
+      3: apply μ0.
+      + apply IHe1.
+        assumption.
+      + apply IHe2.
+        assumption.
+    - destruct (infer Γ e) eqn:q.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      inversion p.
+      subst.
+      apply judge_sym.
+      apply IHe.
+      assumption.
+    - destruct (infer Γ e1) eqn:q1.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (infer Γ e2) eqn:q2.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (eq_dec κ κ0).
+      all: try discriminate.
+      inversion p.
+      subst.
+      eapply judge_cast_pos.
+      Unshelve.
+      3: apply κ0.
+      + apply IHe1.
+        assumption.
+      + apply IHe2.
+        assumption.
+    - destruct (infer Γ e1) eqn:q1.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (infer Γ e2) eqn:q2.
+      all: try discriminate.
+      destruct s.
+      all: try discriminate.
+      destruct (eq_dec κ κ0).
+      all: try discriminate.
+      inversion p.
+      subst.
+      eapply judge_cast_nec.
+      Unshelve.
+      3: apply κ0.
+      + apply IHe1.
+        assumption.
+      + apply IHe2.
+        assumption.
+  Defined.
 
   Theorem infer_complete Γ e τ :
-    proof α [Γ ⊢ e ∈ τ] → infer e Γ = Some τ.
+    Γ ⊢ e ∈ τ → infer Γ e = Some τ.
     admit.
   Admitted.
 End infer.
@@ -541,6 +573,34 @@ Variant label :=
 (* pretty hacky *)
 Definition load (x: string) (Γ: F.t nat): nat :=
   if F.find x Γ is Some n then n else O.
+
+Record bundle A := sup {
+  s: Type ;
+  π: s → A ;
+}.
+Arguments sup {A}.
+Arguments π {A}.
+
+Coercion s: bundle >-> Sortclass.
+
+Notation "'sup' x .. y , P" := {| π x := .. {| π y := P |} .. |}
+  (at level 200, x binder, y binder, right associativity,
+  format "'[ ' '[ ' 'sup'  x .. y ']' , '/' P ']'").
+
+
+Reserved Notation "P ———— Q" (at level 90, format "'//' P '//' ———— '//' Q").
+
+Record prop A :=
+  impl {
+      consequent: A ;
+      antecedent: list A ;
+    }.
+Arguments impl {A}.
+Arguments consequent {A}.
+Arguments antecedent {A}.
+
+Notation "P ———— Q" := (impl Q P).
+
 
 Definition reduce α (l: label): bundle (prop (big α)) :=
   match l with
