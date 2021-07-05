@@ -7,6 +7,7 @@ Require Coq.Structures.OrdersAlt.
 Require Coq.Structures.OrderedTypeEx.
 Require Coq.MSets.MSetAVL.
 Require Coq.MSets.MSetInterface.
+Require Coq.FSets.FMapList.
 
 Import IfNotations.
 Import ListNotations.
@@ -14,8 +15,7 @@ Open Scope string_scope.
 
 Close Scope nat.
 
-Module String_as_OT := OrdersAlt.Update_OT OrderedTypeEx.String_as_OT.
-Module S <: MSetInterface.S := MSetAVL.Make String_as_OT.
+Module F := FMapList.Make OrderedTypeEx.String_as_OT.
 
 Reserved Notation "⟨ x , y , .. , z ⟩".
 
@@ -96,100 +96,9 @@ Arguments tm: clear implicits.
 
 Infix "∘" := compose.
 
-Fixpoint free {α} (t: tm α): S.t :=
-  match t with
-  | var x => S.singleton x
-
-  | lam x _ e => S.remove x (free e)
-
-  | app e0 e1 => S.union (free e0) (free e1)
-
-  | fanout e0 e1 => S.union (free e0) (free e1)
-  | π1 e => free e
-  | π2 e => free e
-
-  | necessity _ e => free e
-
-  | nec_comm e => free e
-
-  | ext _ e => free e
-  | dup e => free e
-
-  | pos_comm e => free e
-
-  | box _ e => free e
-
-  | bind e0 x e1 => S.union (free e0) (S.remove x (free e1))
-
-  | compose e0 e1 => S.union (free e0) (free e1)
-
-  | sym e => free e
-
-  | cast_pos e0 e1 => S.union (free e0) (free e1)
-  | cast_nec e0 e1 => S.union (free e0) (free e1)
-
-  | _ => S.empty
-  end.
-
-Definition ns (A: Type): nat → Type :=
-  fix loop n :=
-    match n with
-    | O => True
-    | S n' => A * loop n'
-    end.
-
-
-Record map V := map_intro {
-  keys: S.t ;
-  vals s: S.In s keys → V ;
-}.
-
-Arguments map_intro {V}.
-Arguments keys {V}.
-Arguments vals {V}.
-
-Notation "A |-> B" := (map_intro A B) (at level 30).
-
-#[program]
-Definition mt {V}: map V := S.empty |-> λ s p, _.
-
-Next Obligation.
-Proof.
-  set (abs := S.empty_spec p).
-  contradiction.
-Defined.
-
-#[program]
-Definition put {V} (x: string) (v: V) (m: map V): map V :=
-  S.add x (keys m) |-> λ y p, if string_dec y x then v else vals m y _.
-
-Next Obligation.
-Proof.
-  destruct (S.add_spec (keys m) x y) as [l r].
-  destruct (l p).
-  - contradiction.
-  - assumption.
-Qed.
-
-(* Pretty hacky *)
-#[program]
-Lemma query (x: string) (s: S.t): { S.mem x s = true } + { S.mem x s ≠ true}.
-Proof.
-  set (bit := S.mem x s).
-  destruct bit.
-  - left.
-    reflexivity.
-  - right.
-    discriminate.
-Defined.
-
-Definition get {V} (x: string) (m: map V): option V :=
-  match query x (keys m) with
-  | left p => Some (vals m x (proj1 (S.mem_spec (keys m) _) p))
-  | _ => None
-  end.
-
-Definition ctx α := map (sort α).
+Definition ctx α := string → option (sort α).
+Definition mt {α}: ctx α := λ _, None.
+Definition add {α} x τ (m: ctx α): ctx α := λ y, if string_dec x y then Some τ else m y.
 
 Record ofty α := ofty_intro {
   Γ: ctx α;
@@ -262,16 +171,16 @@ Variant judgement :=
 .
 
 (* A bit of a hack tbh *)
-Variant inmap α := imap (Γ: ctx α) (x: string) (p: S.mem x (keys Γ) = true).
+Variant inmap α := imap (Γ: ctx α) (x: string) (τ: sort α) (p: Γ x = Some τ).
 Arguments imap {α}.
 
 Definition judge α (r: judgement): bundle (prop (ofty α)) :=
   match r with
   | judge_var =>
-    sup '(imap Γ x p), (
+    sup '(imap Γ x τ _), (
       []
       ————
-      Γ ⊢ var x ∈ vals Γ x (proj1 (S.mem_spec (keys Γ) _) p)
+      Γ ⊢ var x ∈ τ
     )
   | judge_tt =>
     sup Γ, (
@@ -293,14 +202,14 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
     )
   | judge_snd =>
     sup '(Γ, τ0, τ1, e), (
-      [ Γ ⊢ e ∈ (τ0 × τ1) ]
+      [Γ ⊢ e ∈ (τ0 × τ1)]
       ————
       Γ ⊢ π2 e ∈ τ1
     )
 
   | judge_lam =>
     sup '(Γ, τ0, τ1, x, e), (
-      [ put x τ0 Γ ⊢ e ∈ τ1]
+      [add x τ0 Γ ⊢ e ∈ τ1]
       ————
       Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
     )
@@ -351,9 +260,9 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
       Γ ⊢ box κ e ∈ (□ κ, τ)
     )
   | judge_bind =>
-   sup '(Γ, κ, τ0, τ1, x, e0, e1), (
+    sup '(Γ, κ, τ0, τ1, x, e0, e1), (
       [Γ ⊢ e0 ∈ (□ κ, τ0) ;
-      put x τ0 Γ ⊢ e1 ∈ (□ κ, τ1)]
+      add x τ0 Γ ⊢ e1 ∈ (□ κ, τ1)]
       ————
       Γ ⊢ bind e0 x e1 ∈ (□ κ, τ1)
     )
@@ -424,14 +333,14 @@ Example proof_compose α κ: proof α [mt ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
 #[program]
 Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]] :=
   judge_lam # (mt, A, A, "x", var "x") ;
-  judge_var # imap _ "x" _ ;
+  judge_var # imap _ "x" _  _ ;
   QED.
 
 #[program]
 Example proof_const α A B: proof α [mt ⊢ lam "x" A (lam "y" B (var "x")) ∈ [A, [B, A]]] :=
   judge_lam # (mt, A, [B, A], "x", lam "y" B (var "x")) ;
   judge_lam # (_, B, A, "y", var "x") ;
-  judge_var # imap _ "x" _ ;
+  judge_var # imap _ "x" _ _ ;
   QED.
 
 Example proof_nec_tt α κ: proof α [mt ⊢ necessity κ tt ∈ □ κ, unit] :=
@@ -441,22 +350,24 @@ Example proof_nec_tt α κ: proof α [mt ⊢ necessity κ tt ∈ □ κ, unit] :
 
 Section infer.
   Context {α: Type} (eq_dec: forall (κ0 κ1: α), {κ0 = κ1} + {κ0 ≠ κ1}).
+
   Definition sort_eq (x y: sort α): {x = y} + {x ≠ y}.
+  Proof.
     decide equality.
   Defined.
 
-  Fixpoint infer (Γ: ctx α) (e: tm α): option (sort α) :=
+  Fixpoint infer (e: tm α) (Γ: ctx α): option (sort α) :=
     match e with
-    | var x => get x Γ
+    | var x => Γ x
 
     | lam x τ0 e =>
-      match infer (put x τ0 Γ) e with
+      match infer e (add x τ0 Γ) with
       | Some τ1 => Some [τ0, τ1]
       | _ => None
       end
 
     | app e0 e1 =>
-      match (infer Γ e0, infer Γ e1) with
+      match (infer e0 Γ, infer e1 Γ) with
       | (Some [τ0, τ1], Some τ0') =>
         if sort_eq τ0 τ0' then
           Some τ1
@@ -468,62 +379,62 @@ Section infer.
     | tt => Some unit
 
     | fanout e0 e1 =>
-      match (infer Γ e0, infer Γ e1) with
+      match (infer e0 Γ, infer e1 Γ) with
       | (Some τ0, Some τ1) => Some (prod τ0 τ1)
       | _ => None
       end
 
     | π1 e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some (prod τ0 τ1) => Some τ0
       | _ => None
       end
 
     | π2 e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some (prod τ0 τ1) => Some τ1
       | _ => None
       end
 
     | necessity κ e =>
-      match infer mt e with
+      match infer e mt with
       | Some τ => Some (□ κ, τ)
       | _ => None
       end
     | nec_comm e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some (□ κ0, □ κ1, τ) => Some (□ κ1, □ κ0, τ)
       | _ => None
       end
 
     | ext κ e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some (□ κ', τ) =>
         if eq_dec κ κ' then Some τ else None
       | _ => None
       end
     | dup e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some (□ κ, τ) => Some (□ κ, □ κ, τ)
       | _ => None
       end
 
     | pos_comm e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some (◇ κ0, ◇ κ1, τ) => Some (◇ κ1, ◇ κ0, τ)
       | _ => None
       end
 
     | box κ e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some τ => Some (◇ κ, τ)
       | _ => None
       end
 
     | bind e0 x e1 =>
-      match infer Γ e0 with
+      match infer e0 Γ with
       | Some (◇ κ0, τ0) =>
-        match infer (put x τ0 Γ) e1 with
+        match infer e1 (add x τ0 Γ) with
         | Some (◇ κ1, τ1) =>
           if eq_dec κ0 κ1 then Some (◇ κ1, τ1) else None
         | _ => None
@@ -533,26 +444,46 @@ Section infer.
 
     | id κ => Some (κ ~ κ)
     | e0 ∘ e1 =>
-      match (infer Γ e0, infer Γ e1) with
+      match (infer e0 Γ, infer e1 Γ) with
       | (Some (κ1 ~ κ2), Some (κ0 ~ κ1')) =>
         if eq_dec κ1 κ1' then Some (κ0 ~ κ2) else None
       | _ => None
       end
 
     | sym e =>
-      match infer Γ e with
+      match infer e Γ with
       | Some (κ0 ~ κ1) => Some (κ1 ~ κ0)
       | _ => None
       end
 
 
-    (* | cast_pos (e0 e1: tm) *)
-    (* | cast_nec (e0 e1: tm) *)
-    | _ => None
+    | cast_pos e0 e1 =>
+      match (infer e0 Γ, infer e1 Γ) with
+      | (Some (κ0 ~ κ1), Some (◇ κ0', τ)) =>
+        if eq_dec κ0 κ0' then Some (◇ κ1, τ) else None
+      | _ => None
+      end
+
+    | cast_nec e0 e1 =>
+      match (infer e0 Γ, infer e1 Γ) with
+      | (Some (κ0 ~ κ1), Some (□ κ0', τ)) =>
+        if eq_dec κ0 κ0' then Some (□ κ1, τ) else None
+      | _ => None
+      end
     end.
 
-  Lemma infer_proof Γ e τ (p: proof α [Γ ⊢ e ∈ τ]): infer Γ e = Some τ.
+  Theorem infer_sound Γ e τ:
+    infer e Γ = Some τ → proof α [Γ ⊢ e ∈ τ].
   Proof.
+    intro p.
+    induction e.
+    all: cbn in *.
+    - apply (judge_var # imap Γ x τ p ; QED).
+    - admit.
+  Admitted.
+
+  Theorem infer_complete Γ e τ :
+    proof α [Γ ⊢ e ∈ τ] → infer e Γ = Some τ.
     admit.
   Admitted.
 End infer.
@@ -566,9 +497,8 @@ Definition alloc {α} (σ: heap α) (e: tm α): nat * heap α :=
   (ix, {| top := S ix ; read n := if Nat.eqb n ix then e else read σ n |}).
 (* FIXME just do the damn substitution *)
 
-Definition environ := map nat.
 Record big α := big_intro {
-  env: environ ;
+  env: F.t nat ;
   from: heap α * tm α;
   to: heap α * tm α;
 }.
@@ -609,8 +539,8 @@ Variant label :=
 .
 
 (* pretty hacky *)
-Definition load (x: string) (Γ: environ): nat :=
-  if get x Γ is Some n then n else O.
+Definition load (x: string) (Γ: F.t nat): nat :=
+  if F.find x Γ is Some n then n else O.
 
 Definition reduce α (l: label): bundle (prop (big α)) :=
   match l with
@@ -676,7 +606,7 @@ Definition reduce α (l: label): bundle (prop (big α)) :=
       [Γ ⊨ (σ0, e0) ⇓ (σ1, lam x τ e2) ;
       (
         let '(ix, σ1') := alloc σ1 e1 in
-        put x ix Γ ⊨ (σ1', e2) ⇓ (σ2, e3)
+        F.add x ix Γ ⊨ (σ1', e2) ⇓ (σ2, e3)
       )
       ]
       ————
@@ -688,7 +618,7 @@ Definition reduce α (l: label): bundle (prop (big α)) :=
       [Γ ⊨ (σ0, e0) ⇓ (σ1, box κ e2) ;
       (
         let '(ix, σ1') := alloc σ1 e2 in
-        put x ix Γ ⊨ (σ1', e1) ⇓ (σ2, e3)
+        F.add x ix Γ ⊨ (σ1', e1) ⇓ (σ2, e3)
       )
       ]
       ————
@@ -774,14 +704,14 @@ Arguments step {α T} r s &.
 Notation "A @ B ; C" := (step A B C) (at level 60, right associativity,
                                       format "A  @  B  ; '//' C").
 
-Example seq_id α κ σ: seq α [mt ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
-  label_compose_id @ (mt, σ,σ,σ, κ, id κ, id κ) ;
-  label_id @ (mt, σ, κ) ;
-  label_id @ (mt, σ, κ) ;
+Example seq_id α κ σ: seq α [F.empty _ ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
+  label_compose_id @ (F.empty _, σ,σ,σ, κ, id κ, id κ) ;
+  label_id @ (F.empty _, σ, κ) ;
+  label_id @ (F.empty _, σ, κ) ;
   HALT.
 
-Example seq_sym α κ σ: seq α [mt ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
+Example seq_sym α κ σ: seq α [F.empty _ ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
   :=
-  label_sym_id @ (mt, σ, σ, κ, id κ) ;
-  label_id @ (mt, σ, κ) ;
+  label_sym_id @ (F.empty _, σ, σ, κ, id κ) ;
+  label_id @ (F.empty _, σ, κ) ;
   HALT.
