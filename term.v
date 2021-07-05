@@ -3,6 +3,7 @@ Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
 Require Import Coq.Vectors.Vector.
 Require Import Coq.Bool.Bool.
+Require Import Coq.Logic.FunctionalExtensionality.
 Require Coq.Structures.OrdersAlt.
 Require Coq.Structures.OrderedTypeEx.
 Require Coq.MSets.MSetAVL.
@@ -99,6 +100,27 @@ Infix "∘" := compose.
 Definition ctx α := string → option (sort α).
 Definition mt {α}: ctx α := λ _, None.
 Definition add {α} x τ (m: ctx α): ctx α := λ y, if string_dec x y then Some τ else m y.
+
+Theorem add_add {α} x τ0 τ1 (m: ctx α): add x τ0 (add x τ1 m) = add x τ0 m.
+Proof.
+  extensionality y.
+  unfold add.
+  destruct (string_dec x y).
+  all: reflexivity.
+Qed.
+
+Theorem add_comm {α} x y τ0 τ1 (m: ctx α):
+  x ≠ y →
+ add x τ0 (add y τ1 m) = add y τ1 (add x τ0 m).
+Proof.
+  intro p.
+  extensionality z.
+  unfold add.
+  destruct (string_dec x z), (string_dec y z).
+  all: try reflexivity.
+  subst.
+  contradiction.
+Qed.
 
 Reserved Notation "Γ ⊢ e ∈ τ" (at level 80).
 
@@ -298,7 +320,7 @@ Section infer.
       end
     end.
 
-  Theorem infer_sound Γ e τ:
+  Theorem infer_sound {Γ e τ}:
     infer Γ e = Some τ → Γ ⊢ e ∈ τ.
   Proof.
     generalize dependent Γ.
@@ -514,60 +536,63 @@ Section infer.
         assumption.
   Defined.
 
-  Theorem infer_complete Γ e τ :
+  Theorem infer_complete {Γ e τ}:
     Γ ⊢ e ∈ τ → infer Γ e = Some τ.
     intro p.
     induction p.
     all: cbn in *.
     all: auto.
-    - rewrite IHp1, IHp2.
-      reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp1, IHp2.
-      destruct (sort_eq τ0 τ0).
+    all: try rewrite IHp.
+    all: try rewrite IHp1.
+    all: try rewrite IHp2.
+    all: try reflexivity.
+    - destruct (sort_eq τ0 τ0).
       2: contradiction.
       reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp.
-      destruct (eq_dec κ κ).
+    - destruct (eq_dec κ κ).
       2: contradiction.
       reflexivity.
-    - rewrite IHp.
-      destruct (eq_dec κ κ).
+    - destruct (eq_dec κ κ).
       2: contradiction.
       reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp1, IHp2.
-      destruct (eq_dec κ κ).
+    - destruct (eq_dec κ1 κ1).
       2: contradiction.
       reflexivity.
-    - rewrite IHp1, IHp2.
-      destruct (eq_dec κ1 κ1).
+    - destruct (eq_dec κ0 κ0).
       2: contradiction.
       reflexivity.
-    - rewrite IHp.
-      reflexivity.
-    - rewrite IHp1, IHp2.
-      destruct (eq_dec κ0 κ0).
-      2: contradiction.
-      reflexivity.
-    - rewrite IHp1, IHp2.
-      destruct (eq_dec κ0 κ0).
+    - destruct (eq_dec κ0 κ0).
       2: contradiction.
       reflexivity.
   Qed.
 End infer.
+
+Definition includes {α} (Γ Δ: ctx α): Prop :=
+  ∀ x τ, Δ x = Some τ → Γ x = Some τ.
+
+Notation "Γ ⊑ Δ" := (includes Γ Δ) (at level 90).
+
+Theorem weaken {α Γ Δ} {e: tm α} {τ}:
+    Γ ⊑ Δ →
+    Δ ⊢ e ∈ τ → Γ ⊢ e ∈ τ.
+Proof.
+  intros p ty.
+  generalize dependent Γ.
+  induction ty.
+  all: intros.
+  all: econstructor.
+  all: eauto.
+  - apply IHty.
+    unfold add.
+    intros ? ? ?.
+    destruct (string_dec x x0).
+    all: auto.
+  - apply IHty2.
+    unfold add.
+    intros ? ? ?.
+    destruct (string_dec x x0).
+    all: auto.
+Qed.
 
 Variant whnf {α}: tm α → Type :=
 | whnf_tt: whnf tt
@@ -580,48 +605,47 @@ Variant whnf {α}: tm α → Type :=
 
 Reserved Notation "'[' x ':=' s ']' t" (at level 20).
 
-Fixpoint subst {α} (x : string) (s : tm α) (ev : tm α) : tm α :=
-  match ev with
-  | var y =>
-    if string_dec x y
-    then s
-    else ev
+Section subst.
+  Context {α: Type} (x: string) (s: tm α).
+  Fixpoint subst (ev: tm α): tm α :=
+    match ev with
+    | var y => if string_dec x y then s else ev
 
-  | lam y τ e =>
-    if string_dec x y
-    then ev
-    else lam y τ ([x := s] e)
-  | bind e0 y e1 =>
-    bind ([x := s] e0) y (if string_dec x y then e1 else [x := s] e1)
+    | lam y τ e => if string_dec x y then ev else lam y τ (subst e)
+    | bind e0 y e1 =>
+      bind (subst e0) y (if string_dec x y then e1 else subst e1)
 
-  | tt => tt
+    | tt => ev
 
-  | app e0 e1 => app ([x:=s] e0) ([x:=s] e1)
+    | app e0 e1 => app (subst e0) (subst e1)
 
-  | fanout e0 e1 => fanout ([x:=s] e0) ([x:=s] e1)
-  | π1 e => π1 ([x:=s] e)
-  | π2 e => π2 ([x:=s] e)
+    | fanout e0 e1 => fanout (subst e0) (subst e1)
+    | π1 e => π1 (subst e)
+    | π2 e => π2 (subst e)
 
-  | necessity κ e => necessity κ ([x:=s] e)
-  | nec_comm e => nec_comm ([x:=s] e)
+    | necessity κ e => necessity κ (subst e)
+    | nec_comm e => nec_comm (subst e)
 
-  | ext κ e => ext κ ([x:=s] e)
-  | dup e => dup ([x:=s] e)
+    | ext κ e => ext κ (subst e)
+    | dup e => dup (subst e)
 
-  | pos_comm e => pos_comm ([x:=s] e)
-  | box κ e => box κ ([x:=s] e)
+    | pos_comm e => pos_comm (subst e)
+    | box κ e => box κ (subst e)
 
-  | id κ => id κ
-  | e0 ∘ e1 => ([x:=s] e0) ∘ ([x:=s] e1)
-  | sym e => sym ([x:=s] e)
+    | id κ => id κ
+    | e0 ∘ e1 =>  (subst e0) ∘ (subst e1)
+    | sym e => sym (subst e)
 
-  | cast_pos e0 e1 => cast_pos ([x:=s] e0) ([x:=s] e1)
-  | cast_nec e0 e1 => cast_nec ([x:=s] e0) ([x:=s] e1)
-  end
-where "'[' x ':=' s ']' t" := (subst x s t) .
+    | cast_pos e0 e1 => cast_pos (subst e0) (subst e1)
+    | cast_nec e0 e1 => cast_nec (subst e0) (subst e1)
+    end.
+End subst.
 
-Theorem subst_type {α} Γ x τ2 (e0 e1: tm α) τ0 τ1:
-  add x τ2 Γ ⊢ e0 ∈ τ0 →
+Notation "'[' x ':=' s ']' t" := (subst x s t) .
+
+Theorem subst_type {α} {Γ x} {e0 e1: tm α} {τ0 τ1}
+   (eq_dec: forall (κ0 κ1: α), {κ0 = κ1} + {κ0 ≠ κ1}):
+  add x τ1 Γ ⊢ e0 ∈ τ0 →
   mt ⊢ e1 ∈ τ1 →
   Γ ⊢ [x:=e1]e0 ∈ τ0.
 Proof.
@@ -630,10 +654,58 @@ Proof.
   generalize dependent τ0.
   induction e0.
   all: intros.
-  all: cbn in *.
-  - destruct (string_dec x x0).
+  all: inversion p.
+  all: subst.
+  all: try econstructor.
+  all: try eauto.
+  - cbn.
+    destruct (string_dec x x0) eqn:r.
+    + cbn in *.
+      set (p' := infer_complete eq_dec p).
+      unfold add in p'.
+      cbn in *.
+      rewrite r in p'.
+      cbn in *.
+      inversion p'.
+      subst.
+      refine (weaken _ q).
+      intros ? ? ?.
+      unfold mt in *.
+      discriminate.
+    + cbn in *.
+      set (p' := infer_complete eq_dec p).
+      unfold add in p'.
+      cbn in *.
+      rewrite r in p'.
+      apply judge_var.
+      auto.
+  - cbn in *.
+    destruct (string_dec x x0).
     + subst.
-Admitted.
+      apply judge_lam.
+      rewrite add_add in X.
+      assumption.
+    + apply judge_lam.
+      apply IHe0.
+      rewrite add_comm.
+      1: assumption.
+      assumption.
+  - cbn.
+    apply IHe0.
+    refine (weaken _ X).
+    intros ? ? ?.
+    unfold mt in *.
+    discriminate.
+  - cbn.
+    destruct (string_dec x x0).
+    + subst.
+      rewrite add_add in X0.
+      auto.
+    + apply IHe0_2.
+      rewrite add_comm in X0.
+      2: auto.
+      auto.
+Qed.
 
 Reserved Notation "t '-->' t'" (at level 40).
 
@@ -710,4 +782,4 @@ Inductive step {α} : tm α → tm α → Prop :=
       e1 --> e1' →
       cast_nec e0 e1 --> cast_nec e0 e1'
 
-where "t '-->' t'" := (step t t').
+where "A '-->' B" := (step A B).
