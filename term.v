@@ -2,6 +2,7 @@ Require Import Coq.Unicode.Utf8.
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
 Require Import Coq.Vectors.Vector.
+Require Import Coq.Bool.Bool.
 Require Coq.Structures.OrdersAlt.
 Require Coq.Structures.OrderedTypeEx.
 Require Coq.MSets.MSetAVL.
@@ -15,6 +16,29 @@ Close Scope nat.
 
 Module String_as_OT := OrdersAlt.Update_OT OrderedTypeEx.String_as_OT.
 Module S <: MSetInterface.S := MSetAVL.Make String_as_OT.
+
+Reserved Notation "⟨ x , y , .. , z ⟩".
+
+Reserved Notation "'some' x .. y , P"
+         (at level 200, x binder, y binder, right associativity,
+          format "'[ ' '[ ' 'some'  x .. y ']' ,  '/' P ']'").
+Reserved Notation "'Σ' x .. y , P"
+         (at level 200, x binder, y binder, right associativity,
+          format "'[ ' '[ ' 'Σ'  x .. y ']' ,  '/' P ']'").
+
+
+Record someT [A] (P: A → Type) := some_intro { head: A ; tail: P head ; }.
+Add Printing Let someT.
+
+Arguments some_intro [A P].
+Arguments head [A P].
+Arguments tail [A P].
+
+Module Import SomeNotations.
+  Notation "'some' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
+  Notation "'Σ' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
+  Notation "⟨ x , y , .. , z ⟩" := (some_intro .. (some_intro x y) .. z) : core_scope.
+End SomeNotations.
 
  Inductive sort {α} :=
 | unit
@@ -71,7 +95,6 @@ Inductive tm {α}: Type :=
 Arguments tm: clear implicits.
 
 Infix "∘" := compose.
-Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z).
 
 Fixpoint free {α} (t: tm α): S.t :=
   match t with
@@ -115,42 +138,61 @@ Definition ns (A: Type): nat → Type :=
     | S n' => A * loop n'
     end.
 
-Record map K V := map_intro {
-  keys: list K ;
-  vals: ns V (List.length keys) ;
+
+Record map V := map_intro {
+  keys: S.t ;
+  vals s: S.In s keys → V ;
 }.
-Arguments map_intro {K V}.
-Arguments keys {K V}.
-Arguments vals {K V}.
+
+Arguments map_intro {V}.
+Arguments keys {V}.
+Arguments vals {V}.
 
 Notation "A |-> B" := (map_intro A B) (at level 30).
 
-Definition mt {K V}: map K V := [] |-> I.
-Definition put {K V} x v (m: map K V) := (x :: keys m) |-> (v, vals m).
+#[program]
+Definition mt {V}: map V := S.empty |-> λ s p, _.
 
-Section lookup.
-  Context {K V: Type}.
-  Variable (eq_dec: ∀ (x0 x1: K), {x0 = x1} + {x0 ≠ x1}).
+Next Obligation.
+Proof.
+  set (abs := S.empty_spec p).
+  contradiction.
+Defined.
 
-  #[local]
-  Definition find (x: K) (ks: list K) (vs: ns V (List.length ks)) : option V.
-    induction ks as [|y T].
-    - apply None.
-    - cbn in *.
-      destruct (eq_dec x y).
-      + apply (Some (fst vs)).
-      + apply (IHT (snd vs)).
-  Defined.
+#[program]
+Definition put {V} (x: string) (v: V) (m: map V): map V :=
+  S.add x (keys m) |-> λ y p, if string_dec y x then v else vals m y _.
 
-  Definition lookup x (Γ: map K V) := find x (keys Γ) (vals Γ).
-End lookup.
+Next Obligation.
+Proof.
+  destruct (S.add_spec (keys m) x y) as [l r].
+  destruct (l p).
+  - contradiction.
+  - assumption.
+Qed.
 
-Definition ctx α := map string (sort α).
+(* Pretty hacky *)
+#[program]
+Lemma query (x: string) (s: S.t): { S.mem x s = true } + { S.mem x s ≠ true}.
+Proof.
+  set (bit := S.mem x s).
+  destruct bit.
+  - left.
+    reflexivity.
+  - right.
+    discriminate.
+Defined.
 
-Definition get {α} x (Γ: ctx α) := lookup String.string_dec x Γ.
+Definition get {V} (x: string) (m: map V): option V :=
+  match query x (keys m) with
+  | left p => Some (vals m x (proj1 (S.mem_spec (keys m) _) p))
+  | _ => None
+  end.
+
+Definition ctx α := map (sort α).
 
 Record ofty α := ofty_intro {
-  Γ: ctx α ;
+  Γ: ctx α;
   e: tm α;
   τ: sort α;
 }.
@@ -178,12 +220,12 @@ Reserved Notation "P ———— Q" (at level 90, format "'//' P '//' ———
 
 Record prop A :=
   impl {
-      head: A ;
-      tail: list A ;
+      consequent: A ;
+      antecedent: list A ;
     }.
 Arguments impl {A}.
-Arguments head {A}.
-Arguments tail {A}.
+Arguments consequent {A}.
+Arguments antecedent {A}.
 
 Notation "P ———— Q" := (impl Q P).
 
@@ -219,17 +261,17 @@ Variant judgement :=
 | judge_cast_pos
 .
 
-(* Hacky is there a better way ? *)
-Variant inmap α := imap (Γ: ctx α) (x: string) (τ: sort α) (p: Some τ = get x Γ).
+(* A bit of a hack tbh *)
+Variant inmap α := imap (Γ: ctx α) (x: string) (p: S.mem x (keys Γ) = true).
 Arguments imap {α}.
 
 Definition judge α (r: judgement): bundle (prop (ofty α)) :=
   match r with
   | judge_var =>
-    sup '(imap Γ x τ _), (
+    sup '(imap Γ x p), (
       []
       ————
-      Γ ⊢ var x ∈ τ
+      Γ ⊢ var x ∈ vals Γ x (proj1 (S.mem_spec (keys Γ) _) p)
     )
   | judge_tt =>
     sup Γ, (
@@ -241,7 +283,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
     sup '(Γ, τ0, τ1, e0, e1), (
       [ Γ ⊢ e0 ∈ τ0 ; Γ ⊢ e1 ∈ τ1]
       ————
-      Γ ⊢ ⟨ e0, e1 ⟩ ∈ (τ0 × τ1)
+      Γ ⊢ fanout e0 e1 ∈ (τ0 × τ1)
     )
   | judge_fst =>
     sup '(Γ, τ0, τ1, e), (
@@ -250,10 +292,10 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
       Γ ⊢ π1 e ∈ τ0
     )
   | judge_snd =>
-    sup '(Γ, τ0, τ1, e0, e1), (
-      [ Γ ⊢ e0 ∈ τ0 ]
+    sup '(Γ, τ0, τ1, e), (
+      [ Γ ⊢ e ∈ (τ0 × τ1) ]
       ————
-      Γ ⊢ ⟨ e0, e1 ⟩ ∈ (τ0 × τ1)
+      Γ ⊢ π2 e ∈ τ1
     )
 
   | judge_lam =>
@@ -283,20 +325,20 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
     )
 
   | judge_ext =>
-    sup '(Γ, κ, τ, e), (
+    sup '( κ, τ, e, Γ ), (
       [Γ ⊢ e ∈ (□ κ, τ)]
       ————
       Γ ⊢ ext κ e ∈ τ
     )
   | judge_dup =>
-    sup '(Γ, κ, τ, e), (
+    sup '( Γ, κ, τ, e ), (
       [Γ ⊢ e ∈ (□ κ, τ)]
       ————
       Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
     )
 
   | judge_pos_comm =>
-    sup '(Γ, κ0, κ1, τ, e), (
+    sup '( κ0, κ1, τ, e, Γ ), (
       [Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ)]
       ————
       Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
@@ -309,7 +351,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
       Γ ⊢ box κ e ∈ (□ κ, τ)
     )
   | judge_bind =>
-    sup '(Γ, κ, τ0, τ1, x, e0, e1), (
+   sup '(Γ, κ, τ0, τ1, x, e0, e1), (
       [Γ ⊢ e0 ∈ (□ κ, τ0) ;
       put x τ0 Γ ⊢ e1 ∈ (□ κ, τ1)]
       ————
@@ -317,7 +359,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
     )
 
   | judge_id =>
-    sup '(Γ, κ), (
+    sup '( Γ, κ), (
       []
       ————
       Γ ⊢ id κ ∈ (κ ~ κ)
@@ -359,8 +401,8 @@ Inductive proof α: list (ofty α) → Type :=
     (r: judgement)
     (s: judge α r)
   :
-    proof α (tail (π (judge α r) s) ++ T) →
-    proof α (head (π (judge α r) s) :: T).
+    proof α (antecedent (π (judge α r) s) ++ T) →
+    proof α (consequent (π (judge α r) s) :: T).
 
 Arguments QED {α}.
 Arguments andso {α T} r s &.
@@ -382,14 +424,14 @@ Example proof_compose α κ: proof α [mt ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
 #[program]
 Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]] :=
   judge_lam # (mt, A, A, "x", var "x") ;
-  judge_var # imap (["x"] |-> (A, I)) "x" A _ ;
+  judge_var # imap _ "x" _ ;
   QED.
 
 #[program]
 Example proof_const α A B: proof α [mt ⊢ lam "x" A (lam "y" B (var "x")) ∈ [A, [B, A]]] :=
   judge_lam # (mt, A, [B, A], "x", lam "y" B (var "x")) ;
-  judge_lam # (["x"] |-> (A, I), B, A, "y", var "x") ;
-  judge_var # imap (["y" ; "x"] |-> (B, (A, I))) "x" A _ ;
+  judge_lam # (_, B, A, "y", var "x") ;
+  judge_var # imap _ "x" _ ;
   QED.
 
 Example proof_nec_tt α κ: proof α [mt ⊢ necessity κ tt ∈ □ κ, unit] :=
@@ -425,7 +467,7 @@ Section infer.
 
     | tt => Some unit
 
-    | ⟨ e0, e1 ⟩ =>
+    | fanout e0 e1 =>
       match (infer Γ e0, infer Γ e1) with
       | (Some τ0, Some τ1) => Some (prod τ0 τ1)
       | _ => None
@@ -524,7 +566,7 @@ Definition alloc {α} (σ: heap α) (e: tm α): nat * heap α :=
   (ix, {| top := S ix ; read n := if Nat.eqb n ix then e else read σ n |}).
 (* FIXME just do the damn substitution *)
 
-Definition environ := map string nat.
+Definition environ := map nat.
 Record big α := big_intro {
   env: environ ;
   from: heap α * tm α;
@@ -566,9 +608,9 @@ Variant label :=
 | label_cast_nec
 .
 
-(* Pretty hacky *)
-Definition load x (Γ: environ) :=
-  if lookup String.string_dec x Γ is Some n then n else O.
+(* pretty hacky *)
+Definition load (x: string) (Γ: environ): nat :=
+  if get x Γ is Some n then n else O.
 
 Definition reduce α (l: label): bundle (prop (big α)) :=
   match l with
@@ -595,7 +637,7 @@ Definition reduce α (l: label): bundle (prop (big α)) :=
     sup '(Γ, σ, e0, e1), (
       []
       ————
-      Γ ⊨ (σ, ⟨ e0, e1 ⟩) ⇓ (σ, ⟨ e0 , e1 ⟩)
+      Γ ⊨ (σ, fanout e0 e1) ⇓ (σ, fanout e0 e1)
     )
   | label_lam =>
     sup '(Γ, σ, x, τ, e), (
@@ -655,13 +697,13 @@ Definition reduce α (l: label): bundle (prop (big α)) :=
 
   | label_π1_fanout =>
     sup '(Γ, σ0, σ1, e0, e1, e2), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, ⟨e1, e2⟩) ]
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) ]
       ————
       Γ ⊨ (σ0, π1 e0) ⇓ (σ1, e1)
     )
   | label_π2_fanout =>
     sup '(Γ, σ0, σ1, e0, e1, e2), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, ⟨e1, e2⟩) ]
+      [Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) ]
       ————
       Γ ⊨ (σ0, π2 e0) ⇓ (σ1, e2)
     )
@@ -723,8 +765,8 @@ Inductive seq α: list (big α) → Type :=
     (r: label)
     (s: reduce α r)
   :
-    seq α (tail (π (reduce α r) s) ++ T) →
-    seq α (head (π (reduce α r) s) :: T).
+    seq α (antecedent (π (reduce α r) s) ++ T) →
+    seq α (consequent (π (reduce α r) s) :: T).
 
 Arguments HALT {α}.
 Arguments step {α T} r s &.
