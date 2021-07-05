@@ -2,13 +2,21 @@ Require Import Coq.Unicode.Utf8.
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
 Require Import Coq.Vectors.Vector.
+Require Coq.Structures.OrdersAlt.
+Require Coq.Structures.OrderedTypeEx.
+Require Coq.MSets.MSetAVL.
+Require Coq.MSets.MSetInterface.
+
 Import IfNotations.
 Import ListNotations.
 Open Scope string_scope.
 
 Close Scope nat.
 
-Inductive sort {α} :=
+Module String_as_OT := OrdersAlt.Update_OT OrderedTypeEx.String_as_OT.
+Module S <: MSetInterface.S := MSetAVL.Make String_as_OT.
+
+ Inductive sort {α} :=
 | unit
 | prod (A B: sort)
 | exp (s t: sort)
@@ -64,6 +72,41 @@ Arguments tm: clear implicits.
 
 Infix "∘" := compose.
 Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z).
+
+Fixpoint free {α} (t: tm α): S.t :=
+  match t with
+  | var x => S.singleton x
+
+  | lam x _ e => S.remove x (free e)
+
+  | app e0 e1 => S.union (free e0) (free e1)
+
+  | fanout e0 e1 => S.union (free e0) (free e1)
+  | π1 e => free e
+  | π2 e => free e
+
+  | necessity _ e => free e
+
+  | nec_comm e => free e
+
+  | ext _ e => free e
+  | dup e => free e
+
+  | pos_comm e => free e
+
+  | box _ e => free e
+
+  | bind e0 x e1 => S.union (free e0) (S.remove x (free e1))
+
+  | compose e0 e1 => S.union (free e0) (free e1)
+
+  | sym e => free e
+
+  | cast_pos e0 e1 => S.union (free e0) (free e1)
+  | cast_nec e0 e1 => S.union (free e0) (free e1)
+
+  | _ => S.empty
+  end.
 
 Definition ns (A: Type): nat → Type :=
   fix loop n :=
@@ -176,14 +219,17 @@ Variant judgement :=
 | judge_cast_pos
 .
 
+(* Hacky is there a better way ? *)
+Variant inmap α := imap (Γ: ctx α) (x: string) (τ: sort α) (p: Some τ = get x Γ).
+Arguments imap {α}.
+
 Definition judge α (r: judgement): bundle (prop (ofty α)) :=
   match r with
   | judge_var =>
-    sup '(Γ, x), (
+    sup '(imap Γ x τ _), (
       []
-        ————
-        (* Hacky is there a better way ? *)
-      Γ ⊢ var x ∈ if get x Γ is Some τ then τ else unit
+      ————
+      Γ ⊢ var x ∈ τ
     )
   | judge_tt =>
     sup Γ, (
@@ -317,7 +363,7 @@ Inductive proof α: list (ofty α) → Type :=
     proof α (head (π (judge α r) s) :: T).
 
 Arguments QED {α}.
-Arguments andso {α T}.
+Arguments andso {α T} r s &.
 
 Notation "A # B ; C" := (andso A B C) (at level 60, right associativity,
                                       format "A  #  B  ; '//' C").
@@ -333,15 +379,17 @@ Example proof_compose α κ: proof α [mt ⊢ id κ ∘ id κ ∈ (κ ~ κ)]
     judge_id # (mt, κ) ;
     QED.
 
+#[program]
 Example proof_id α A: proof α [mt ⊢ lam "x" A (var "x") ∈ [A, A]] :=
   judge_lam # (mt, A, A, "x", var "x") ;
-  judge_var # (["x"] |-> (A, I), "x") ;
+  judge_var # imap (["x"] |-> (A, I)) "x" A _ ;
   QED.
 
+#[program]
 Example proof_const α A B: proof α [mt ⊢ lam "x" A (lam "y" B (var "x")) ∈ [A, [B, A]]] :=
   judge_lam # (mt, A, [B, A], "x", lam "y" B (var "x")) ;
   judge_lam # (["x"] |-> (A, I), B, A, "y", var "x") ;
-  judge_var # (["y" ; "x"] |-> (B, (A, I)), "x") ;
+  judge_var # imap (["y" ; "x"] |-> (B, (A, I))) "x" A _ ;
   QED.
 
 Example proof_nec_tt α κ: proof α [mt ⊢ necessity κ tt ∈ □ κ, unit] :=
@@ -360,7 +408,7 @@ Section infer.
     | var x => get x Γ
 
     | lam x τ0 e =>
-      match infer ((x :: keys Γ) |-> (τ0, vals Γ)) e with
+      match infer (put x τ0 Γ) e with
       | Some τ1 => Some [τ0, τ1]
       | _ => None
       end
@@ -400,15 +448,46 @@ Section infer.
       | Some τ => Some (□ κ, τ)
       | _ => None
       end
+    | nec_comm e =>
+      match infer Γ e with
+      | Some (□ κ0, □ κ1, τ) => Some (□ κ1, □ κ0, τ)
+      | _ => None
+      end
 
-    (* | nec_comm (e: tm) *)
+    | ext κ e =>
+      match infer Γ e with
+      | Some (□ κ', τ) =>
+        if eq_dec κ κ' then Some τ else None
+      | _ => None
+      end
+    | dup e =>
+      match infer Γ e with
+      | Some (□ κ, τ) => Some (□ κ, □ κ, τ)
+      | _ => None
+      end
 
-    (* | ext (κ: α) (e: tm) *)
-    (* | dup (e: tm) *)
+    | pos_comm e =>
+      match infer Γ e with
+      | Some (◇ κ0, ◇ κ1, τ) => Some (◇ κ1, ◇ κ0, τ)
+      | _ => None
+      end
 
-    (* | pos_comm (e: tm) *)
-    (* | box (κ: α) (e: tm) *)
-    (* | bind (e0: tm) (x: string) (e1: tm) *)
+    | box κ e =>
+      match infer Γ e with
+      | Some τ => Some (◇ κ, τ)
+      | _ => None
+      end
+
+    | bind e0 x e1 =>
+      match infer Γ e0 with
+      | Some (◇ κ0, τ0) =>
+        match infer (put x τ0 Γ) e1 with
+        | Some (◇ κ1, τ1) =>
+          if eq_dec κ0 κ1 then Some (◇ κ1, τ1) else None
+        | _ => None
+        end
+      | _ => None
+      end
 
     | id κ => Some (κ ~ κ)
     | e0 ∘ e1 =>
@@ -429,6 +508,11 @@ Section infer.
     (* | cast_nec (e0 e1: tm) *)
     | _ => None
     end.
+
+  Lemma infer_proof Γ e τ (p: proof α [Γ ⊢ e ∈ τ]): infer Γ e = Some τ.
+  Proof.
+    admit.
+  Admitted.
 End infer.
 
 Record heap α := { top: nat ; read: nat → tm α ;}.
@@ -643,7 +727,7 @@ Inductive seq α: list (big α) → Type :=
     seq α (head (π (reduce α r) s) :: T).
 
 Arguments HALT {α}.
-Arguments step {α T}.
+Arguments step {α T} r s &.
 
 Notation "A @ B ; C" := (step A B C) (at level 60, right associativity,
                                       format "A  @  B  ; '//' C").
