@@ -578,249 +578,86 @@ Definition alloc {α} (σ: heap α) (e: tm α): nat * heap α :=
   (ix, {| top := S ix ; read n := if Nat.eqb n ix then e else read σ n |}).
 (* FIXME just do the damn substitution *)
 
-Record big α := big_intro {
-  env: F.t nat ;
-  from: heap α * tm α;
-  to: heap α * tm α;
-}.
-Arguments big_intro {α}.
-Arguments env {α}.
-Arguments from {α}.
-Arguments to {α}.
 
-Notation "s ⊨ A ⇓ B" := (big_intro s A B) (at level 80).
-
-Variant label :=
-| label_var
-
-| label_tt
-| label_fanout
-| label_lam
-| label_necessity
-| label_box
-| label_id
-
-| label_app
-| label_bind
-
-| label_π1_fanout
-| label_π2_fanout
-
-| label_nec_comm
-| label_pos_comm
-
-| label_dup
-| label_ext_necessity
-
-| label_compose_id
-| label_sym_id
-
-| label_cast_pos
-| label_cast_nec
-.
+Reserved Notation "s ⊨ A ⇓ B"  (at level 80).
 
 (* pretty hacky *)
 Definition load (x: string) (Γ: F.t nat): nat :=
   if F.find x Γ is Some n then n else O.
 
-Record bundle A := sup {
-  s: Type ;
-  π: s → A ;
-}.
-Arguments sup {A}.
-Arguments π {A}.
+Inductive big {α}: F.t nat → heap α * tm α → heap α * tm α → Type :=
+  (* FIXME environment/store is probably all wrong :( *)
+| big_var Γ σ x: Γ ⊨ (σ, var x) ⇓ (σ, read σ (load x Γ))
 
-Coercion s: bundle >-> Sortclass.
+| big_tt Γ σ:
+    Γ ⊨ (σ, tt) ⇓ (σ, tt)
 
-Notation "'sup' x .. y , P" := {| π x := .. {| π y := P |} .. |}
-  (at level 200, x binder, y binder, right associativity,
-  format "'[ ' '[ ' 'sup'  x .. y ']' , '/' P ']'").
+| big_id Γ σ κ:
+    Γ ⊨ (σ, id κ) ⇓ (σ, id κ)
 
+| big_fanout Γ σ e0 e1:
+  Γ ⊨ (σ, fanout e0 e1) ⇓ (σ, fanout e0 e1)
 
-Reserved Notation "P ———— Q" (at level 90, format "'//' P '//' ———— '//' Q").
+| big_lam Γ σ x τ e:
+  Γ ⊨ (σ, lam x τ e) ⇓ (σ, lam x τ e)
 
-Record prop A :=
-  impl {
-      consequent: A ;
-      antecedent: list A ;
-    }.
-Arguments impl {A}.
-Arguments consequent {A}.
-Arguments antecedent {A}.
+| big_necessity Γ σ κ e:
+    Γ ⊨ (σ, necessity κ e) ⇓ (σ, necessity κ e)
 
-Notation "P ———— Q" := (impl Q P).
+| big_box Γ σ κ e:
+    Γ ⊨ (σ, box κ e) ⇓ (σ, box κ e)
 
-
-Definition reduce α (l: label): bundle (prop (big α)) :=
-  match l with
-(* FIXME environment/store is probably all wrong :( *)
-  | label_var =>
-    sup '(Γ, σ, x), (
-      []
-      ————
-      Γ ⊨ (σ, var x) ⇓ (σ, read σ (load x Γ))
-    )
-  | label_tt =>
-    sup '(Γ, σ), (
-      []
-      ————
-      Γ ⊨ (σ, tt) ⇓ (σ, tt)
-    )
-  | label_id =>
-    sup '(Γ, σ, κ), (
-      []
-      ————
-      Γ ⊨ (σ, id κ) ⇓ (σ, id κ)
-    )
-  | label_fanout =>
-    sup '(Γ, σ, e0, e1), (
-      []
-      ————
-      Γ ⊨ (σ, fanout e0 e1) ⇓ (σ, fanout e0 e1)
-    )
-  | label_lam =>
-    sup '(Γ, σ, x, τ, e), (
-      []
-      ————
-      Γ ⊨ (σ, lam x τ e) ⇓ (σ, lam x τ e)
-    )
-  | label_necessity =>
-    sup '(Γ, σ, κ, e), (
-      []
-      ————
-      Γ ⊨ (σ, necessity κ e) ⇓ (σ, necessity κ e)
-    )
-  | label_box =>
-    sup '(Γ, σ, κ, e), (
-      []
-      ————
-      Γ ⊨ (σ, box κ e) ⇓ (σ, box κ e)
-    )
-
-  | label_ext_necessity =>
-    sup '(Γ, σ0, σ1, κ, e0, e1), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1)]
-      ————
+| big_ext_necessity Γ σ0 σ1 κ e0 e1:
+      Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1) →
       Γ ⊨ (σ0, ext κ e0) ⇓ (σ1, e1)
-    )
-  | label_dup =>
-    sup '(Γ, σ0, σ1, κ, e0, e1), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1)]
-      ————
+
+| big_dup Γ σ0 σ1 κ e0 e1:
+      Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ e1) →
       Γ ⊨ (σ0, dup e0) ⇓ (σ1, necessity κ (necessity κ e1))
-    )
 
-  | label_app =>
-    sup '(Γ, σ0, σ1, σ2, x, τ, e0, e1, e2, e3), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, lam x τ e2) ;
-      (
-        let '(ix, σ1') := alloc σ1 e1 in
-        F.add x ix Γ ⊨ (σ1', e2) ⇓ (σ2, e3)
-      )
-      ]
-      ————
-      Γ ⊨ (σ0, app e0 e1) ⇓ (σ2, e3)
-    )
+| big_app Γ σ0 σ1 σ2 x τ e0 e1 e2 e3:
+    Γ ⊨ (σ0, e0) ⇓ (σ1, lam x τ e2) →
+    (let '(ix, σ1') := alloc σ1 e1 in
+    F.add x ix Γ ⊨ (σ1', e2) ⇓ (σ2, e3)) →
+    Γ ⊨ (σ0, app e0 e1) ⇓ (σ2, e3)
 
-  | label_bind =>
-    sup '(Γ, σ0, σ1, σ2, x, κ, e0, e1, e2, e3), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, box κ e2) ;
-      (
-        let '(ix, σ1') := alloc σ1 e2 in
-        F.add x ix Γ ⊨ (σ1', e1) ⇓ (σ2, e3)
-      )
-      ]
-      ————
+| big_bind Γ σ0 σ1 σ2 x κ e0 e1 e2 e3:
+      (Γ ⊨ (σ0, e0) ⇓ (σ1, box κ e2)) →
+      (let '(ix, σ1') := alloc σ1 e2 in
+       F.add x ix Γ ⊨ (σ1', e1) ⇓ (σ2, e3)) →
       Γ ⊨ (σ0, bind e0 x e1) ⇓ (σ2, e3)
-    )
 
-  | label_π1_fanout =>
-    sup '(Γ, σ0, σ1, e0, e1, e2), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) ]
-      ————
+| big_π1_fanout Γ σ0 σ1 e0 e1 e2:
+      Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) →
       Γ ⊨ (σ0, π1 e0) ⇓ (σ1, e1)
-    )
-  | label_π2_fanout =>
-    sup '(Γ, σ0, σ1, e0, e1, e2), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) ]
-      ————
-      Γ ⊨ (σ0, π2 e0) ⇓ (σ1, e2)
-    )
 
-  | label_nec_comm =>
-     sup '(Γ, σ0, σ1, κ0, κ1, e0, e1), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ0 (necessity κ1 e1))]
-      ————
+| big_π2_fanout Γ σ0 σ1 e0 e1 e2:
+    Γ ⊨ (σ0, e0) ⇓ (σ1, fanout e1 e2) →
+    Γ ⊨ (σ0, π2 e0) ⇓ (σ1, e2)
+
+| big_nec_comm Γ σ0 σ1 κ0 κ1 e0 e1:
+      Γ ⊨ (σ0, e0) ⇓ (σ1, necessity κ0 (necessity κ1 e1)) →
       Γ ⊨ (σ0, nec_comm e0) ⇓ (σ1, necessity κ1 (necessity κ0 e1))
-    )
-  | label_pos_comm =>
-     sup '(Γ, σ0, σ1, κ0, κ1, e0, e1), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, box κ0 (box κ1 e1))]
-      ————
+| big_pos_comm Γ σ0 σ1 κ0 κ1 e0 e1:
+      Γ ⊨ (σ0, e0) ⇓ (σ1, box κ0 (box κ1 e1)) →
       Γ ⊨ (σ0, pos_comm e0) ⇓ (σ1, box κ1 (box κ0 e1))
-    )
 
-
-  | label_compose_id =>
-    sup '(Γ, σ0, σ1, σ2, κ, e0, e1), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, id κ); Γ ⊨ (σ1, e1) ⇓ (σ2, id κ)]
-      ————
+| big_compose_id Γ σ0 σ1 σ2 κ e0 e1:
+      Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) → Γ ⊨ (σ1, e1) ⇓ (σ2, id κ) →
       Γ ⊨ (σ0, e0 ∘ e1) ⇓ (σ2, id κ)
-    )
 
-  | label_sym_id =>
-    sup '(Γ, σ0, σ1, κ, e), (
-      [Γ ⊨ (σ0, e) ⇓ (σ1, id κ)]
-      ————
-      Γ ⊨ (σ0, sym e) ⇓ (σ1, id κ)
-    )
+| big_sym_id Γ σ0 σ1 κ e:
+    Γ ⊨ (σ0, e) ⇓ (σ1, id κ) →
+    Γ ⊨ (σ0, sym e) ⇓ (σ1, id κ)
 
-  | label_cast_pos =>
-    sup '(Γ, σ0, σ1, σ2, κ, e0, e1, e2), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) ;
-       Γ ⊨ (σ1, e1) ⇓ (σ2, box κ e2)
-      ]
-      ————
-      Γ ⊨ (σ0, cast_nec e0 e1) ⇓ (σ2, e2)
-    )
+| big_cast_nec Γ σ0 σ1 σ2 κ e0 e1 e2:
+    Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) →
+    Γ ⊨ (σ1, e1) ⇓ (σ2, necessity κ e2) →
+    Γ ⊨ (σ0, cast_nec e0 e1) ⇓ (σ2, necessity κ e2)
 
-  | label_cast_nec =>
-    sup '(Γ, σ0, σ1, σ2, κ, e0, e1, e2), (
-      [Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) ;
-       Γ ⊨ (σ1, e1) ⇓ (σ2, necessity κ e2)
-      ]
-      ————
-      Γ ⊨ (σ0, cast_nec e0 e1) ⇓ (σ2, e2)
-    )
-  end
-.
-(* Unfortunately seq cannot be the same as proof due to weird
-inference issues *)
+| big_cast_pos Γ σ0 σ1 σ2 κ e0 e1 e2:
+    Γ ⊨ (σ0, e0) ⇓ (σ1, id κ) →
+    Γ ⊨ (σ1, e1) ⇓ (σ2, box κ e2) →
+    Γ ⊨ (σ0, cast_pos e0 e1) ⇓ (σ2, box κ e2)
+where "s ⊨ A ⇓ B" := (big s A B).
 
-Inductive seq α: list (big α) → Type :=
-| HALT: seq α []
-| step
-    {T}
-    (r: label)
-    (s: reduce α r)
-  :
-    seq α (antecedent (π (reduce α r) s) ++ T) →
-    seq α (consequent (π (reduce α r) s) :: T).
-
-Arguments HALT {α}.
-Arguments step {α T} r s &.
-
-Notation "A @ B ; C" := (step A B C) (at level 60, right associativity,
-                                      format "A  @  B  ; '//' C").
-
-Example seq_id α κ σ: seq α [F.empty _ ⊨ (σ, id κ ∘ id κ) ⇓ (σ, id κ)] :=
-  label_compose_id @ (F.empty _, σ,σ,σ, κ, id κ, id κ) ;
-  label_id @ (F.empty _, σ, κ) ;
-  label_id @ (F.empty _, σ, κ) ;
-  HALT.
-
-Example seq_sym α κ σ: seq α [F.empty _ ⊨ (σ, sym (id κ)) ⇓ (σ, id κ)]
-  :=
-  label_sym_id @ (F.empty _, σ, σ, κ, id κ) ;
-  label_id @ (F.empty _, σ, κ) ;
-  HALT.
