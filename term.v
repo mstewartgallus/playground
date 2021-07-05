@@ -215,7 +215,7 @@ Definition judge α (r: judgement): bundle (prop (ofty α)) :=
     )
   | judge_app =>
     sup '(Γ, τ0, τ1, e0, e1), (
-      [Γ ⊢ e0 ∈ τ0]
+      [Γ ⊢ e0 ∈ [τ0, τ1]; Γ ⊢ e1 ∈ τ0]
       ————
       Γ ⊢ app e0 e1 ∈ τ1
     )
