@@ -20,30 +20,7 @@ Close Scope nat.
 
 Module F := FMapList.Make OrderedTypeEx.String_as_OT.
 
-Reserved Notation "⟨ x , y , .. , z ⟩".
-
-Reserved Notation "'some' x .. y , P"
-         (at level 200, x binder, y binder, right associativity,
-          format "'[ ' '[ ' 'some'  x .. y ']' ,  '/' P ']'").
-Reserved Notation "'Σ' x .. y , P"
-         (at level 200, x binder, y binder, right associativity,
-          format "'[ ' '[ ' 'Σ'  x .. y ']' ,  '/' P ']'").
-
-
-Record someT [A] (P: A → Type) := some_intro { head: A ; tail: P head ; }.
-Add Printing Let someT.
-
-Arguments some_intro [A P].
-Arguments head [A P].
-Arguments tail [A P].
-
-Module Import SomeNotations.
-  Notation "'some' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
-  Notation "'Σ' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
-  Notation "⟨ x , y , .. , z ⟩" := (some_intro .. (some_intro x y) .. z) : core_scope.
-End SomeNotations.
-
- Inductive sort {α} :=
+Inductive sort {α} :=
 | unit
 | prod (A B: sort)
 | exp (s t: sort)
@@ -56,7 +33,8 @@ Arguments sort: clear implicits.
 Notation "[ A , B ]" := (exp A B).
 Infix "×" := prod (at level 50).
 
-Notation "◇ κ , A" := (pos κ A) (at level 200).
+Notation "'Σ' κ , A" := (pos κ A) (at level 200).
+(* Like forall but I use box because ∀ is already taken *)
 Notation "□ κ , A" := (nec κ A) (at level 200).
 Infix "~" := eq (at level 90).
 
@@ -166,16 +144,16 @@ Inductive judge {α} (Γ: ctx α): tm α → sort α → Type :=
     Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
 
 | judge_pos_comm κ0 κ1 e τ:
-    Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ) →
-    Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
+    Γ ⊢ e ∈ (Σ κ0, Σ κ1, τ) →
+    Γ ⊢ pos_comm e ∈ (Σ κ1, Σ κ0, τ)
 
 | judge_box κ e τ:
     Γ ⊢ e ∈ τ →
-    Γ ⊢ box κ e ∈ (◇ κ, τ)
+    Γ ⊢ box κ e ∈ (Σ κ, τ)
 
 | judge_bind e0 e1 x κ τ0 τ1:
-    Γ ⊢ e0 ∈ (◇ κ, τ0) → add x τ0 Γ ⊢ e1 ∈ (◇ κ, τ1) →
-    Γ ⊢ bind e0 x e1 ∈ (◇ κ, τ1)
+    Γ ⊢ e0 ∈ (Σ κ, τ0) → add x τ0 Γ ⊢ e1 ∈ (Σ κ, τ1) →
+    Γ ⊢ bind e0 x e1 ∈ (Σ κ, τ1)
 
 | judge_id κ:
     Γ ⊢ id κ ∈ (κ ~ κ)
@@ -190,8 +168,8 @@ Inductive judge {α} (Γ: ctx α): tm α → sort α → Type :=
 
 (* Really unsure of these as faithful to cylindrical logic *)
 | judge_cast_pos e0 e1 κ0 κ1 τ:
-      Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (◇ κ0, τ) →
-      Γ ⊢ cast_pos e0 e1 ∈ (◇ κ1, τ)
+      Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (Σ κ0, τ) →
+      Γ ⊢ cast_pos e0 e1 ∈ (Σ κ1, τ)
 | judge_cast_nec e0 e1 κ0 κ1 τ:
     Γ ⊢ e0 ∈ (κ0 ~ κ1) →
     Γ ⊢ e1 ∈ (□ κ0, τ) →
@@ -271,22 +249,22 @@ Section infer.
 
     | pos_comm e =>
       match infer Γ e with
-      | Some (◇ κ0, ◇ κ1, τ) => Some (◇ κ1, ◇ κ0, τ)
+      | Some (Σ κ0, Σ κ1, τ) => Some (Σ κ1, Σ κ0, τ)
       | _ => None
       end
 
     | box κ e =>
       match infer Γ e with
-      | Some τ => Some (◇ κ, τ)
+      | Some τ => Some (Σ κ, τ)
       | _ => None
       end
 
     | bind e0 x e1 =>
       match infer Γ e0 with
-      | Some (◇ κ0, τ0) =>
+      | Some (Σ κ0, τ0) =>
         match infer (add x τ0 Γ) e1 with
-        | Some (◇ κ1, τ1) =>
-          if eq_dec κ0 κ1 then Some (◇ κ1, τ1) else None
+        | Some (Σ κ1, τ1) =>
+          if eq_dec κ0 κ1 then Some (Σ κ1, τ1) else None
         | _ => None
         end
       | _ => None
@@ -309,8 +287,8 @@ Section infer.
 
     | cast_pos e0 e1 =>
       match (infer Γ e0, infer Γ e1) with
-      | (Some (κ0 ~ κ1), Some (◇ κ0', τ)) =>
-        if eq_dec κ0 κ0' then Some (◇ κ1, τ) else None
+      | (Some (κ0 ~ κ1), Some (Σ κ0', τ)) =>
+        if eq_dec κ0 κ0' then Some (Σ κ1, τ) else None
       | _ => None
       end
 

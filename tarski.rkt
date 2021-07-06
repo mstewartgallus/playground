@@ -13,9 +13,9 @@
   (τ ∅ ⊤ (τ → τ) (τ + τ) (τ × τ)
      
      ; Possibly, like existential
-     (◇ κ τ)
+     (Σ κ τ)
      ; Necessarily, like universal
-     (□ κ τ)
+     (∀ κ τ)
 
      (κ = κ)
      Z)
@@ -52,8 +52,8 @@
      (K e e)
      (dup e)
 
-     (□-comm e)
-     (◇-comm e)
+     (∀-comm e)
+     (Σ-comm e)
 
      (e ∘ e)
      (sym e)
@@ -123,42 +123,42 @@
   ; Universal
   [(types () e τ)
    -------------------------
-   (types Γ (κ ⊢ e) (□ κ τ))]
+   (types Γ (κ ⊢ e) (∀ κ τ))]
   
-  [(types Γ e (□ κ τ))
+  [(types Γ e (∀ κ τ))
    -------------------------
    (types Γ (T e) τ)]
   
-  [(types Γ e_0 (□ κ (τ_0 → τ_1)))
-   (types Γ e_1 (□ κ τ_0))
+  [(types Γ e_0 (∀ κ (τ_0 → τ_1)))
+   (types Γ e_1 (∀ κ τ_0))
    -------------------------
-   (types Γ (K e_0 e_1) (□ κ τ_1))]
+   (types Γ (K e_0 e_1) (∀ κ τ_1))]
 
-  [(types Γ e (□ κ τ))
+  [(types Γ e (∀ κ τ))
    -------------------------
-   (types Γ (dup e) (□ κ (□ κ τ)))]
+   (types Γ (dup e) (∀ κ (∀ κ τ)))]
 
   ; Existentials
   ; yes the M-word
  
   [(types Γ e τ)
     -------------------------
-   (types Γ (box κ e) (◇ κ τ))]
+   (types Γ (box κ e) (Σ κ τ))]
 
-  [(types (p ...) e_0 (◇ κ τ_0))
-   (types ([x : τ_0] p ...) e_1 (◇ κ τ_1))
+  [(types (p ...) e_0 (Σ κ τ_0))
+   (types ([x : τ_0] p ...) e_1 (Σ κ τ_1))
     -------------------------
-   (types (p ...) (let (x e_0) e_1) (◇ κ τ_1))]
+   (types (p ...) (let (x e_0) e_1) (Σ κ τ_1))]
 
   ; Commutativity of existentials/universals
    
-  [(types Γ e (□ κ_1 (□ κ_0 τ)))
+  [(types Γ e (∀ κ_1 (∀ κ_0 τ)))
     -------------------------
-   (types Γ (□-comm e) (□ κ_0 (□ κ_1 τ)))]
+   (types Γ (∀-comm e) (∀ κ_0 (∀ κ_1 τ)))]
 
-  [(types Γ e (◇ κ_1 (◇ κ_0 τ)))
+  [(types Γ e (Σ κ_1 (Σ κ_0 τ)))
     -------------------------
-   (types Γ (◇-comm e) (◇ κ_0 (◇ κ_1 τ)))]
+   (types Γ (Σ-comm e) (Σ κ_0 (Σ κ_1 τ)))]
 
   ; Identity type reflexivity, transitivity and symmetry.
   [
@@ -211,8 +211,8 @@
 
      (let (x E) e)
 
-     (□-comm E)
-     (◇-comm E)
+     (∀-comm E)
+     (Σ-comm E)
 
      (v ∘ E) (E ∘ e)
      (sym E)
@@ -260,24 +260,24 @@
    
    (--> (in-hole E (T (κ ⊢ e)))
         (in-hole E e)
-        "□-T")
+        "∀-T")
    (--> (in-hole E (K (κ ⊢ e_0) (κ ⊢ e_1)))
         (in-hole E (κ ⊢ (e_0 e_1)))
-        "□-K")
+        "∀-K")
    (--> (in-hole E (dup (κ ⊢ e)))
         (in-hole E (κ ⊢ (κ ⊢ e)))
-        "□-dup")
+        "∀-dup")
    
-   (--> (in-hole E (□-comm (κ_0 ⊢ (κ_1 ⊢ e))))
+   (--> (in-hole E (∀-comm (κ_0 ⊢ (κ_1 ⊢ e))))
         (in-hole E (κ_1 ⊢ (κ_0 ⊢ e)))
-        "□-comm")
+        "∀-comm")
 
    (--> (in-hole E (let (x (box κ e_0)) e_1))
         (in-hole E (substitute e_1 x e_0))
-        "◇-let")
-   (--> (in-hole E (◇-comm (box κ_0 (box κ_1 e))))
+        "Σ-let")
+   (--> (in-hole E (Σ-comm (box κ_0 (box κ_1 e))))
         (in-hole E (box κ_1 (box κ_0 e)))
-        "◇-comm")
+        "Σ-comm")
 
    (--> (in-hole E ((id κ) ∘ (id κ)))
         (in-hole E (id κ))
