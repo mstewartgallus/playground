@@ -20,6 +20,29 @@ Close Scope nat.
 
 Module F := FMapList.Make OrderedTypeEx.String_as_OT.
 
+Reserved Notation "⟨ x , y , .. , z ⟩".
+
+Reserved Notation "'some' x .. y , P"
+         (at level 200, x binder, y binder, right associativity,
+          format "'[ ' '[ ' 'some'  x .. y ']' ,  '/' P ']'").
+Reserved Notation "'Σ' x .. y , P"
+         (at level 200, x binder, y binder, right associativity,
+          format "'[ ' '[ ' 'Σ'  x .. y ']' ,  '/' P ']'").
+
+Record someT [A] (P: A → Type) := some_intro { head: A ; tail: P head ; }.
+
+Arguments some_intro [A P].
+Arguments head [A P].
+Arguments tail [A P].
+
+Module Import SomeNotations.
+  Add Printing Let someT.
+
+  Notation "'some' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
+  Notation "'Σ' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
+  Notation "⟨ x , y , .. , z ⟩" := (some_intro .. (some_intro x y) .. z) : core_scope.
+End SomeNotations.
+
 Inductive sort {α} :=
 | unit
 | prod (A B: sort)
@@ -33,7 +56,7 @@ Arguments sort: clear implicits.
 Notation "[ A , B ]" := (exp A B).
 Infix "×" := prod (at level 50).
 
-Notation "'Σ' κ , A" := (pos κ A) (at level 200).
+Notation "'◇' κ , A" := (pos κ A) (at level 200).
 (* Like forall but I use box because ∀ is already taken *)
 Notation "□ κ , A" := (nec κ A) (at level 200).
 Infix "~" := eq (at level 90).
@@ -144,16 +167,16 @@ Inductive judge {α} (Γ: ctx α): tm α → sort α → Type :=
     Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
 
 | judge_pos_comm κ0 κ1 e τ:
-    Γ ⊢ e ∈ (Σ κ0, Σ κ1, τ) →
-    Γ ⊢ pos_comm e ∈ (Σ κ1, Σ κ0, τ)
+    Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ) →
+    Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
 
 | judge_box κ e τ:
     Γ ⊢ e ∈ τ →
-    Γ ⊢ box κ e ∈ (Σ κ, τ)
+    Γ ⊢ box κ e ∈ (◇ κ, τ)
 
 | judge_bind e0 e1 x κ τ0 τ1:
-    Γ ⊢ e0 ∈ (Σ κ, τ0) → add x τ0 Γ ⊢ e1 ∈ (Σ κ, τ1) →
-    Γ ⊢ bind e0 x e1 ∈ (Σ κ, τ1)
+    Γ ⊢ e0 ∈ (◇ κ, τ0) → add x τ0 Γ ⊢ e1 ∈ (◇ κ, τ1) →
+    Γ ⊢ bind e0 x e1 ∈ (◇ κ, τ1)
 
 | judge_id κ:
     Γ ⊢ id κ ∈ (κ ~ κ)
@@ -168,8 +191,8 @@ Inductive judge {α} (Γ: ctx α): tm α → sort α → Type :=
 
 (* Really unsure of these as faithful to cylindrical logic *)
 | judge_cast_pos e0 e1 κ0 κ1 τ:
-      Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (Σ κ0, τ) →
-      Γ ⊢ cast_pos e0 e1 ∈ (Σ κ1, τ)
+      Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (◇ κ0, τ) →
+      Γ ⊢ cast_pos e0 e1 ∈ (◇ κ1, τ)
 | judge_cast_nec e0 e1 κ0 κ1 τ:
     Γ ⊢ e0 ∈ (κ0 ~ κ1) →
     Γ ⊢ e1 ∈ (□ κ0, τ) →
@@ -249,22 +272,22 @@ Section infer.
 
     | pos_comm e =>
       match infer Γ e with
-      | Some (Σ κ0, Σ κ1, τ) => Some (Σ κ1, Σ κ0, τ)
+      | Some (◇ κ0, ◇ κ1, τ) => Some (◇ κ1, ◇ κ0, τ)
       | _ => None
       end
 
     | box κ e =>
       match infer Γ e with
-      | Some τ => Some (Σ κ, τ)
+      | Some τ => Some (◇ κ, τ)
       | _ => None
       end
 
     | bind e0 x e1 =>
       match infer Γ e0 with
-      | Some (Σ κ0, τ0) =>
+      | Some (◇ κ0, τ0) =>
         match infer (add x τ0 Γ) e1 with
-        | Some (Σ κ1, τ1) =>
-          if eq_dec κ0 κ1 then Some (Σ κ1, τ1) else None
+        | Some (◇ κ1, τ1) =>
+          if eq_dec κ0 κ1 then Some (◇ κ1, τ1) else None
         | _ => None
         end
       | _ => None
@@ -287,8 +310,8 @@ Section infer.
 
     | cast_pos e0 e1 =>
       match (infer Γ e0, infer Γ e1) with
-      | (Some (κ0 ~ κ1), Some (Σ κ0', τ)) =>
-        if eq_dec κ0 κ0' then Some (Σ κ1, τ) else None
+      | (Some (κ0 ~ κ1), Some (◇ κ0', τ)) =>
+        if eq_dec κ0 κ0' then Some (◇ κ1, τ) else None
       | _ => None
       end
 
@@ -598,6 +621,36 @@ Variant whnf {α}: tm α → Type :=
 | whnf_id κ: whnf (id κ)
 .
 
+
+Lemma canonical {α} {v: tm α} {τ}:
+  mt ⊢ v ∈ τ → whnf v →
+  match τ with
+  | unit => (v = tt: Type)
+  | prod _ _ => Σ e0 e1, v = fanout e0 e1
+  | exp τ0 _ => Σ x e0, v = lam x τ0 e0
+  | pos κ _ => Σ e, v = box κ e
+  | nec κ _ => Σ e, v = necessity κ e
+  | eq κ _ => v = id κ
+  end.
+Proof.
+  intros p w.
+  destruct τ.
+  all: destruct w.
+  all: inversion p.
+  all: subst.
+  all: eauto.
+  - exists e0.
+    exists e1.
+    reflexivity.
+  - exists x.
+    exists e.
+    reflexivity.
+  - exists e.
+    reflexivity.
+  - exists e.
+    reflexivity.
+Defined.
+
 Reserved Notation "'[' x ':=' s ']' t" (at level 20).
 
 Section subst.
@@ -720,17 +773,26 @@ Inductive step {α}: tm α → tm α → Type :=
 | step_dup_necessity κ e:
     dup (necessity κ e) ~> necessity κ (necessity κ e)
 
+| step_nec_comm_necessity κ e:
+    nec_comm (necessity κ e) ~> necessity κ e
+| step_pos_comm_box κ e:
+    pos_comm (box κ e) ~> box κ e
+
 | step_sym_id κ:
     sym (id κ) ~> id κ
-| step_compose_id κ:
-    id κ ∘ id κ ~> id κ
+| step_compose_id κ0 κ1:
+    id κ0 ∘ id κ1 ~> id κ0
 
 | step_cast_pos_id_box κ e:
     cast_pos (id κ) (box κ e) ~> box κ e
 | step_cast_nec_id_box κ e:
     cast_nec (id κ) (necessity κ e) ~> necessity κ e
 
-| step_app e0 e0' e1:
+| step_bind e0 x e1 e0':
+    e0 ~> e0' →
+    bind e0 x e1 ~> bind e0' x e1
+
+| step_app e0 e1 e0':
     e0 ~> e0' →
     app e0 e1 ~> app e0' e1
 | step_π1 e e':
@@ -762,6 +824,10 @@ Inductive step {α}: tm α → tm α → Type :=
     e1 ~> e1' →
     e0 ∘ e1 ~> e0 ∘ e1'
 
+| step_sym e e':
+    e ~> e' →
+    sym e ~> sym e'
+
 | step_cast_pos_l e0 e1 e0':
     e0 ~> e0' →
     cast_pos e0 e1 ~> cast_pos e0' e1
@@ -777,6 +843,186 @@ Inductive step {α}: tm α → tm α → Type :=
     cast_nec e0 e1 ~> cast_nec e0 e1'
 
 where "A '~>' B" := (step A B).
+
+Theorem progress {α} (e: tm α) {τ}:
+  mt ⊢ e ∈ τ →
+  whnf e + Σ e', e ~> e'.
+Proof.
+  remember mt as Γ.
+  intro p.
+  induction p.
+  all: subst.
+  all: try discriminate.
+  all: try (left; constructor).
+  all: try destruct (IHp eq_refl).
+  all: try destruct (IHp1 eq_refl).
+  all: try destruct (IHp2 eq_refl).
+  - right.
+    destruct (canonical p w) as [A T].
+    destruct T as [B T].
+    subst.
+    exists A.
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (π1 e').
+    constructor.
+    auto.
+  - right.
+    destruct (canonical p w) as [A T].
+    destruct T as [B T].
+    subst.
+    exists B.
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (π2 e').
+    constructor.
+    auto.
+  - right.
+    destruct (canonical p1 w) as [x T].
+    destruct T as [body T].
+    subst.
+    exists ([x := e1] body).
+    constructor.
+  - right.
+    destruct (canonical p1 w) as [x T].
+    destruct T as [body T].
+    subst.
+    exists ([x := e1] body).
+    constructor.
+  - right.
+    destruct s as [e0' T].
+    exists (app e0' e1).
+    constructor.
+    auto.
+  - right.
+    destruct s as [e0' T].
+    exists (app e0' e1).
+    constructor.
+    auto.
+  - right.
+    destruct (canonical p w) as [e0 T].
+    subst.
+    exists (necessity κ0 e0).
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (nec_comm e').
+    constructor.
+    auto.
+  - right.
+    destruct (canonical p w) as [e0 T].
+    subst.
+    exists e0.
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (ext κ e').
+    constructor.
+    auto.
+  - right.
+    destruct (canonical p w) as [e0 T].
+    subst.
+    exists (necessity κ (necessity κ e0)).
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (dup e').
+    constructor.
+    auto.
+  - right.
+    destruct (canonical p w) as [e0 T].
+    subst.
+    exists (box κ0 e0).
+    constructor.
+  - right.
+    destruct s as [e0].
+    exists (pos_comm e0).
+    constructor.
+    auto.
+  - right.
+    destruct (canonical p1 w) as [e0' T].
+    subst.
+    exists ([x := e0'] e1).
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (bind e' x e1).
+    constructor.
+    auto.
+  - right.
+    repeat rewrite (canonical p2 w0) in *.
+    repeat rewrite (canonical p1 w) in *.
+    exists (id κ1).
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (e0 ∘ e').
+    constructor.
+    auto.
+  - right.
+    destruct s as [e' T].
+    exists (e' ∘ e1).
+    constructor.
+    auto.
+  - right.
+    destruct s as [e' T].
+    exists (e' ∘ e1).
+    constructor.
+    auto.
+  - right.
+    repeat rewrite (canonical p w) in *.
+    exists (id κ1).
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (sym e').
+    constructor.
+    auto.
+  - right.
+    repeat rewrite (canonical p1 w) in *.
+    destruct (canonical p2 w0) as [e' T].
+    subst.
+    exists (box κ0 e').
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (cast_pos e0 e').
+    constructor.
+    auto.
+  - right.
+    destruct s as [e' T].
+    exists (cast_pos e' e1).
+    constructor.
+    auto.
+  - right.
+    destruct s as [e' T].
+    exists (cast_pos e' e1).
+    constructor.
+    auto.
+  - right.
+    repeat rewrite (canonical p1 w) in *.
+    destruct (canonical p2 w0) as [e' T].
+    subst.
+    exists (necessity κ0 e').
+    constructor.
+  - right.
+    destruct s as [e' T].
+    exists (cast_nec e0 e').
+    constructor.
+    auto.
+  - right.
+    destruct s as [e' T].
+    exists (cast_nec e' e1).
+    constructor.
+    auto.
+  - right.
+    destruct s as [e' T].
+    exists (cast_nec e' e1).
+    constructor.
+    auto.
+Defined.
 
 Inductive multistep {α} (X: tm α): tm α → Type :=
 | halt: multistep X X
