@@ -79,12 +79,10 @@ Inductive tm {α}: Type :=
 | π2 (e: tm)
 
 | necessity (κ: α) (e: tm)
-| nec_comm (e: tm)
 
 | ext (κ: α) (e: tm)
 | dup (e: tm)
 
-| pos_comm (e: tm)
 | box (κ: α) (e: tm)
 | bind (e0: tm) (x: string) (e1: tm)
 
@@ -155,9 +153,6 @@ Inductive judge {α} (Γ: ctx α): tm α → sort α → Type :=
 | judge_necessity κ e τ:
     mt ⊢ e ∈ τ →
     Γ ⊢ necessity κ e ∈ (□ κ, τ)
-| judge_nec_comm κ0 κ1 e τ:
-    Γ ⊢ e ∈ (□ κ0, □ κ1, τ) →
-    Γ ⊢ nec_comm e ∈ (□ κ1, □ κ0, τ)
 
 | judge_ext κ e τ:
     Γ ⊢ e ∈ (□ κ, τ) →
@@ -165,10 +160,6 @@ Inductive judge {α} (Γ: ctx α): tm α → sort α → Type :=
 | judge_dup κ e τ:
     Γ ⊢ e ∈ (□ κ, τ) →
     Γ ⊢ dup e ∈ (□ κ, □ κ, τ)
-
-| judge_pos_comm κ0 κ1 e τ:
-    Γ ⊢ e ∈ (◇ κ0, ◇ κ1, τ) →
-    Γ ⊢ pos_comm e ∈ (◇ κ1, ◇ κ0, τ)
 
 | judge_box κ e τ:
     Γ ⊢ e ∈ τ →
@@ -252,11 +243,6 @@ Section infer.
       | Some τ => Some (□ κ, τ)
       | _ => None
       end
-    | nec_comm e =>
-      match infer Γ e with
-      | Some (□ κ0, □ κ1, τ) => Some (□ κ1, □ κ0, τ)
-      | _ => None
-      end
 
     | ext κ e =>
       match infer Γ e with
@@ -267,12 +253,6 @@ Section infer.
     | dup e =>
       match infer Γ e with
       | Some (□ κ, τ) => Some (□ κ, □ κ, τ)
-      | _ => None
-      end
-
-    | pos_comm e =>
-      match infer Γ e with
-      | Some (◇ κ0, ◇ κ1, τ) => Some (◇ κ1, ◇ κ0, τ)
       | _ => None
       end
 
@@ -404,17 +384,6 @@ Section infer.
       all: try discriminate.
       destruct s.
       all: try discriminate.
-      destruct s.
-      all: try discriminate.
-      inversion p.
-      subst.
-      apply judge_nec_comm.
-      apply IHe.
-      assumption.
-    - destruct (infer Γ e) eqn:q.
-      all: try discriminate.
-      destruct s.
-      all: try discriminate.
       destruct (eq_dec κ κ0).
       all: try discriminate.
       inversion p.
@@ -429,17 +398,6 @@ Section infer.
       inversion p.
       subst.
       apply judge_dup.
-      apply IHe.
-      assumption.
-    - destruct (infer Γ e) eqn:q.
-      all: try discriminate.
-      destruct s.
-      all: try discriminate.
-      destruct s.
-      all: try discriminate.
-      inversion p.
-      subst.
-      apply judge_pos_comm.
       apply IHe.
       assumption.
     - destruct (infer Γ e) eqn:q.
@@ -590,6 +548,12 @@ Proof.
   auto.
 Qed.
 
+Theorem weakest {α} {Γ: ctx α}: Γ ⊑ mt.
+Proof.
+  intros ? ? ?.
+  discriminate.
+Qed.
+
 Theorem weaken {α Γ Δ} {e: tm α} {τ}:
     Γ ⊑ Δ →
     Δ ⊢ e ∈ τ → Γ ⊢ e ∈ τ.
@@ -621,6 +585,18 @@ Variant whnf {α}: tm α → Type :=
 | whnf_id κ: whnf (id κ)
 .
 
+Variant cd {α}: tm α → Type :=
+| cd_app e0 e1: cd (app e0 e1)
+| cd_π1 e: cd (π1 e)
+| cd_π2 e: cd (π2 e)
+| cd_ext κ e: cd (ext κ e)
+| cd_dup e: cd (dup e)
+| cd_bind e0 x e1: cd (bind e0 x e1)
+| cd_compose e0 e1: cd (e0 ∘ e1)
+| cd_sym e: cd (sym e)
+| cd_cast_pos e0 e1: cd (cast_pos e0 e1)
+| cd_cast_nec e0 e1: cd (cast_nec e0 e1)
+.
 
 Lemma canonical {α} {v: tm α} {τ}:
   mt ⊢ v ∈ τ → whnf v →
@@ -630,7 +606,7 @@ Lemma canonical {α} {v: tm α} {τ}:
   | exp τ0 _ => Σ x e0, v = lam x τ0 e0
   | pos κ _ => Σ e, v = box κ e
   | nec κ _ => Σ e, v = necessity κ e
-  | eq κ _ => v = id κ
+  | eq κ0 κ1 => (κ0 = κ1) ∧ v = id κ0
   end.
 Proof.
   intros p w.
@@ -650,6 +626,7 @@ Proof.
   - exists e.
     reflexivity.
 Defined.
+
 
 Reserved Notation "'[' x ':=' s ']' t" (at level 20).
 
@@ -672,12 +649,10 @@ Section subst.
     | π2 e => π2 (subst e)
 
     | necessity κ e => necessity κ (subst e)
-    | nec_comm e => nec_comm (subst e)
 
     | ext κ e => ext κ (subst e)
     | dup e => dup (subst e)
 
-    | pos_comm e => pos_comm (subst e)
     | box κ e => box κ (subst e)
 
     | id κ => id κ
@@ -773,15 +748,10 @@ Inductive step {α}: tm α → tm α → Type :=
 | step_dup_necessity κ e:
     dup (necessity κ e) ~> necessity κ (necessity κ e)
 
-| step_nec_comm_necessity κ e:
-    nec_comm (necessity κ e) ~> necessity κ e
-| step_pos_comm_box κ e:
-    pos_comm (box κ e) ~> box κ e
-
 | step_sym_id κ:
     sym (id κ) ~> id κ
-| step_compose_id κ0 κ1:
-    id κ0 ∘ id κ1 ~> id κ0
+| step_compose_id κ:
+    id κ ∘ id κ ~> id κ
 
 | step_cast_pos_id_box κ e:
     cast_pos (id κ) (box κ e) ~> box κ e
@@ -806,16 +776,8 @@ Inductive step {α}: tm α → tm α → Type :=
     e ~> e' →
     ext κ e ~> ext κ e'
 | step_dup e e':
-    e ~> e' →
+     e ~> e' →
     dup e ~> dup e'
-
-| step_pos_comm e e':
-    e ~> e' →
-    pos_comm e ~> pos_comm e'
-
-| step_nec_comm e e':
-    e ~> e' →
-    nec_comm e ~> nec_comm e'
 
 | step_compose_l e0 e0' e1:
     e0 ~> e0' →
@@ -844,9 +806,16 @@ Inductive step {α}: tm α → tm α → Type :=
 
 where "A '~>' B" := (step A B).
 
+Lemma to_cd {α} {e e': tm α}: e ~> e' → cd e.
+Proof.
+  intro s.
+  induction s.
+  all: constructor.
+Defined.
+
 Theorem progress {α} (e: tm α) {τ}:
   mt ⊢ e ∈ τ →
-  whnf e + Σ e', e ~> e'.
+  whnf e + (Σ e', e ~> e').
 Proof.
   remember mt as Γ.
   intro p.
@@ -867,7 +836,7 @@ Proof.
     destruct s as [e' T].
     exists (π1 e').
     constructor.
-    auto.
+    all: auto.
   - right.
     destruct (canonical p w) as [A T].
     destruct T as [B T].
@@ -878,7 +847,7 @@ Proof.
     destruct s as [e' T].
     exists (π2 e').
     constructor.
-    auto.
+    all: auto.
   - right.
     destruct (canonical p1 w) as [x T].
     destruct T as [body T].
@@ -895,22 +864,12 @@ Proof.
     destruct s as [e0' T].
     exists (app e0' e1).
     constructor.
-    auto.
+    all: auto.
   - right.
     destruct s as [e0' T].
     exists (app e0' e1).
     constructor.
-    auto.
-  - right.
-    destruct (canonical p w) as [e0 T].
-    subst.
-    exists (necessity κ0 e0).
-    constructor.
-  - right.
-    destruct s as [e' T].
-    exists (nec_comm e').
-    constructor.
-    auto.
+    all: auto.
   - right.
     destruct (canonical p w) as [e0 T].
     subst.
@@ -920,7 +879,7 @@ Proof.
     destruct s as [e' T].
     exists (ext κ e').
     constructor.
-    auto.
+    all: auto.
   - right.
     destruct (canonical p w) as [e0 T].
     subst.
@@ -929,16 +888,6 @@ Proof.
   - right.
     destruct s as [e' T].
     exists (dup e').
-    constructor.
-    auto.
-  - right.
-    destruct (canonical p w) as [e0 T].
-    subst.
-    exists (box κ0 e0).
-    constructor.
-  - right.
-    destruct s as [e0].
-    exists (pos_comm e0).
     constructor.
     auto.
   - right.
@@ -952,9 +901,11 @@ Proof.
     constructor.
     auto.
   - right.
-    repeat rewrite (canonical p2 w0) in *.
-    repeat rewrite (canonical p1 w) in *.
-    exists (id κ1).
+    destruct (canonical p2 w0).
+    subst.
+    destruct (canonical p1 w).
+    subst.
+    exists (id κ2).
     constructor.
   - right.
     destruct s as [e' T].
@@ -972,8 +923,9 @@ Proof.
     constructor.
     auto.
   - right.
-    repeat rewrite (canonical p w) in *.
-    exists (id κ1).
+    destruct (canonical p w).
+    subst.
+    exists (id κ0).
     constructor.
   - right.
     destruct s as [e' T].
@@ -981,10 +933,11 @@ Proof.
     constructor.
     auto.
   - right.
-    repeat rewrite (canonical p1 w) in *.
+    destruct (canonical p1 w).
+    subst.
     destruct (canonical p2 w0) as [e' T].
     subst.
-    exists (box κ0 e').
+    exists (box κ1 e').
     constructor.
   - right.
     destruct s as [e' T].
@@ -1002,10 +955,10 @@ Proof.
     constructor.
     auto.
   - right.
-    repeat rewrite (canonical p1 w) in *.
+    destruct (canonical p1 w).
     destruct (canonical p2 w0) as [e' T].
     subst.
-    exists (necessity κ0 e').
+    exists (necessity κ1 e').
     constructor.
   - right.
     destruct s as [e' T].
@@ -1022,6 +975,103 @@ Proof.
     exists (cast_nec e' e1).
     constructor.
     auto.
+Defined.
+
+Theorem preservation {α}
+        (eq_dec: forall (κ0 κ1: α), {κ0 = κ1} + {κ0 ≠ κ1})
+        (e e': tm α) τ:
+    e ~> e' →
+    mt ⊢ e ∈ τ →
+    mt ⊢ e' ∈ τ.
+Proof.
+  remember mt as Γ.
+  intros st.
+  generalize dependent τ.
+  induction st.
+  all: subst.
+  all: intros τ0 p.
+  all: inversion p.
+  all: subst.
+  - inversion X.
+    subst.
+    apply (subst_type eq_dec X1 X0).
+  - inversion X.
+    subst.
+    apply (subst_type eq_dec X0 X1).
+  - inversion X.
+    subst.
+    auto.
+  - inversion X.
+    subst.
+    auto.
+  - inversion X.
+    subst.
+    auto.
+  - inversion X.
+    subst.
+    apply judge_necessity.
+    apply judge_necessity.
+    auto.
+  - inversion X.
+    subst.
+    auto.
+  - inversion X.
+    subst.
+    auto.
+  - inversion X.
+    subst.
+    auto.
+  - inversion X.
+    subst.
+    auto.
+  - eapply judge_bind.
+    Unshelve.
+    3: apply τ1.
+    2: auto.
+    apply IHst.
+    auto.
+  - eapply judge_app.
+    Unshelve.
+    3: apply τ1.
+    all: auto.
+  - eapply judge_π1.
+    Unshelve.
+    2: apply τ2.
+    all: auto.
+  - eapply judge_π2.
+    Unshelve.
+    2: apply τ1.
+    all: auto.
+  - constructor.
+    auto.
+  - constructor.
+    auto.
+  - eapply judge_compose.
+    Unshelve.
+    3: apply κ1.
+    all: auto.
+  - eapply judge_compose.
+    Unshelve.
+    3: apply κ1.
+    all: auto.
+  - constructor.
+    auto.
+  - eapply judge_cast_pos.
+    Unshelve.
+    3: apply κ0.
+    all: auto.
+  - eapply judge_cast_pos.
+    Unshelve.
+    3: apply κ0.
+    all: auto.
+  - eapply judge_cast_nec.
+    Unshelve.
+    3: apply κ0.
+    all: auto.
+  - eapply judge_cast_nec.
+    Unshelve.
+    3: apply κ0.
+    all: auto.
 Defined.
 
 Inductive multistep {α} (X: tm α): tm α → Type :=
@@ -1080,16 +1130,6 @@ Fixpoint eval {α} (e: tm α): option (tm α) :=
       if eval e1 is Some e1'
       then Some (e0 ∘ e1')
       else None
-
-  | pos_comm e =>
-    if eval e is Some e'
-    then Some (pos_comm e')
-    else None
-
-  | nec_comm e =>
-    if eval e is Some e'
-    then Some (nec_comm e')
-    else None
 
   | cast_pos e0 e1 =>
     if eval e0 is Some e0'
