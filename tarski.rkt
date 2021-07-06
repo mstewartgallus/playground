@@ -73,12 +73,21 @@
 
 (define-extended-language cyl+Γ cyl
   [Γ () (p ...)]
-  [p [x : τ]])
+  [p [x : τ] [given κ]])
 
 (define-judgment-form cyl+Γ
   #:mode (types I I O)
   #:contract (types Γ e τ)
- 
+
+  ; Variables
+  [---------------------
+   (types ([x : τ] p ...) x τ)] 
+
+  [(types (p ...) x_1 τ_1)
+    (side-condition (different x_1 x_2))
+    ------------------------------------
+    (types ([x_2 : τ_2] p ...) x_1 τ_1)]
+
   ; Simply typed lambda calculus
   [(types Γ e_0 (τ_0 → τ_1)) (types Γ e_1 τ_0)
    -------------------------
@@ -150,6 +159,21 @@
     -------------------------
    (types (p ...) (let (x e_0) e_1) (Σ κ τ_1))]
 
+  ; Experiment with putting assumptions in the context?
+  [(types ([given κ] p ...) e τ)
+   -------------------------
+   (types (p ...) (assuming κ e) (Σ κ τ))]
+  [(types (p ...) e (Σ κ τ))
+   -------------------------
+   (types ([given κ] p ...) (unbox κ e) τ)]
+
+  [(types (p ...) e τ)
+   -------------------------
+   (types ([given κ] p ...) (tauto κ e) (∀ κ τ))]
+  [(types ([given κ] p ...) e (∀ κ τ))
+   -------------------------
+   (types (p ...) (assumes-nothing κ e) τ)]
+
   ; Commutativity of existentials/universals
    
   [(types Γ e (∀ κ_1 (∀ κ_0 τ)))
@@ -161,8 +185,7 @@
    (types Γ (Σ-comm e) (Σ κ_0 (Σ κ_1 τ)))]
 
   ; Identity type reflexivity, transitivity and symmetry.
-  [
-   -------------------------
+  [-------------------------
    (types Γ (id κ) (κ = κ))]
   [(types Γ e_0 (κ_1 = κ_2)) (types Γ e_1 (κ_0 = κ_1))
     -------------------------
@@ -304,6 +327,10 @@
 (render-language cyl)
 (render-judgment-form types)
 (render-reduction-relation cyl-whnf)
+
+(judgment-holds
+   (types () (λ (x Z) x) (Z → Z))
+   τ)
 
 (judgment-holds
    (types () 4 τ)
