@@ -4,6 +4,8 @@ Require Import Coq.Strings.String.
 Require Import Coq.Vectors.Vector.
 Require Import Coq.Bool.Bool.
 Require Import Coq.Logic.FunctionalExtensionality.
+Require Import Coq.Setoids.Setoid.
+Require Import Coq.Classes.SetoidClass.
 Require Coq.Structures.OrdersAlt.
 Require Coq.Structures.OrderedTypeEx.
 Require Coq.MSets.MSetAVL.
@@ -572,6 +574,21 @@ Definition includes {α} (Γ Δ: ctx α): Prop :=
 
 Notation "Γ ⊑ Δ" := (includes Γ Δ) (at level 90).
 
+Instance include_refl α: Reflexive (@includes α).
+Proof.
+  intros ? ? ? ?.
+  auto.
+Qed.
+
+Instance include_trans α: Transitive (@includes α).
+Proof.
+  intros ? ? ? p q ? ? ?.
+  unfold includes in p, q.
+  apply p.
+  apply q.
+  auto.
+Qed.
+
 Theorem weaken {α Γ Δ} {e: tm α} {τ}:
     Γ ⊑ Δ →
     Δ ⊢ e ∈ τ → Γ ⊢ e ∈ τ.
@@ -707,79 +724,179 @@ Proof.
       auto.
 Qed.
 
-Reserved Notation "t '-->' t'" (at level 40).
+Reserved Notation "t '~>' t'" (at level 40).
 
-Inductive step {α} : tm α → tm α → Prop :=
-  | step_app_lam x τ e0 e1:
-      app (lam x τ e0) e1 --> [x:=e1]e0
-  | step_bind_box κ e0 x e1:
-      bind (box κ e0) x e1 --> [x:=e0]e1
+Inductive step {α}: tm α → tm α → Type :=
+| step_app_lam x τ e0 e1:
+    app (lam x τ e0) e1 ~> [x:=e1]e0
+| step_bind_box κ e0 x e1:
+    bind (box κ e0) x e1 ~> [x:=e0]e1
 
-  | step_π1_fanout e0 e1:
-      π1 (fanout e0 e1) --> e0
-  | step_π2_fanout e0 e1:
-      π2 (fanout e0 e1) --> e1
+| step_π1_fanout e0 e1:
+    π1 (fanout e0 e1) ~> e0
+| step_π2_fanout e0 e1:
+    π2 (fanout e0 e1) ~> e1
 
-  | step_ext_necessity κ e:
-      ext κ (necessity κ e) --> e
-  | step_dup_necessity κ e:
-      ext κ (necessity κ e) --> necessity κ (necessity κ e)
+| step_ext_necessity κ e:
+    ext κ (necessity κ e) ~> e
+| step_dup_necessity κ e:
+    dup (necessity κ e) ~> necessity κ (necessity κ e)
 
-  | step_sym_id κ:
-      sym (id κ) --> id κ
-  | step_compose_id κ:
-      id κ ∘ id κ --> id κ
+| step_sym_id κ:
+    sym (id κ) ~> id κ
+| step_compose_id κ:
+    id κ ∘ id κ ~> id κ
 
-  | step_cast_pos_id_box κ e:
-      cast_pos (id κ) (box κ e) --> box κ e
-  | step_cast_nec_id_box κ e:
-      cast_nec (id κ) (necessity κ e) --> necessity κ e
+| step_cast_pos_id_box κ e:
+    cast_pos (id κ) (box κ e) ~> box κ e
+| step_cast_nec_id_box κ e:
+    cast_nec (id κ) (necessity κ e) ~> necessity κ e
 
-  | step_app e0 e0' e1:
-      e0 --> e0' →
-      app e0 e1 --> app e0' e1
-  | step_π1 e e':
-      e --> e' →
-      π1 e --> π1 e'
-  | step_π2 e e':
-      e --> e' →
-      π2 e --> π2 e'
+| step_app e0 e0' e1:
+    e0 ~> e0' →
+    app e0 e1 ~> app e0' e1
+| step_π1 e e':
+    e ~> e' →
+    π1 e ~> π1 e'
+| step_π2 e e':
+    e ~> e' →
+    π2 e ~> π2 e'
 
-  | step_ext κ e e':
-      e --> e' →
-      ext κ e --> ext κ e'
-  | step_dup e e':
-      e --> e' →
-      dup e --> dup e'
+| step_ext κ e e':
+    e ~> e' →
+    ext κ e ~> ext κ e'
+| step_dup e e':
+    e ~> e' →
+    dup e ~> dup e'
 
-  | step_pos_comm e e':
-      e --> e' →
-      pos_comm e --> pos_comm e'
+| step_pos_comm e e':
+    e ~> e' →
+    pos_comm e ~> pos_comm e'
 
-  | step_nec_comm e e':
-      e --> e' →
-      nec_comm e --> nec_comm e'
+| step_nec_comm e e':
+    e ~> e' →
+    nec_comm e ~> nec_comm e'
 
-  | step_compose_l e0 e0' e1:
-      e0 --> e0' →
-      e0 ∘ e1 --> e0' ∘ e1
-  | step_compose_r e0 e1 e1':
-      e1 --> e1' →
-      e0 ∘ e1 --> e0 ∘ e1'
+| step_compose_l e0 e0' e1:
+    e0 ~> e0' →
+    e0 ∘ e1 ~> e0' ∘ e1
+| step_compose_r e0 e1 e1':
+    e1 ~> e1' →
+    e0 ∘ e1 ~> e0 ∘ e1'
 
-  | step_cast_pos_l e0 e1 e0':
-      e0 --> e0' →
-      cast_pos e0 e1 --> cast_pos e0' e1
-  | step_cast_pos_r e0 e1 e1':
-      e1 --> e1' →
-      cast_pos e0 e1 --> cast_pos e0 e1'
+| step_cast_pos_l e0 e1 e0':
+    e0 ~> e0' →
+    cast_pos e0 e1 ~> cast_pos e0' e1
+| step_cast_pos_r e0 e1 e1':
+    e1 ~> e1' →
+    cast_pos e0 e1 ~> cast_pos e0 e1'
 
+| step_cast_nec_l e0 e1 e0':
+    e0 ~> e0' →
+    cast_nec e0 e1 ~> cast_nec e0' e1
+| step_cast_nec_r e0 e1 e1':
+    e1 ~> e1' →
+    cast_nec e0 e1 ~> cast_nec e0 e1'
 
-  | step_cast_nec_l e0 e1 e0':
-      e0 --> e0' →
-      cast_nec e0 e1 --> cast_nec e0' e1
-  | step_cast_nec_r e0 e1 e1':
-      e1 --> e1' →
-      cast_nec e0 e1 --> cast_nec e0 e1'
+where "A '~>' B" := (step A B).
 
-where "A '-->' B" := (step A B).
+Inductive multistep {α} (X: tm α): tm α → Type :=
+| halt: multistep X X
+| andthen {Y Z}: X ~> Y → multistep Y Z → multistep X Z.
+Arguments halt {α X}.
+Arguments andthen {α X Y Z}.
+
+Notation "A ~>* B" := (multistep A B) (at level 90).
+
+Fixpoint eval {α} (e: tm α): option (tm α) :=
+  match e with
+  | app (lam x _ e0) e1 => Some ([x := e1] e0)
+  | bind (box _ e0) x e1 => Some ([x := e0] e1)
+
+  | π1 (fanout e0 _) => Some e0
+  | π2 (fanout _ e1) => Some e1
+
+  | ext _ (necessity _ e) => Some e
+  | dup (necessity κ e) => Some (necessity κ (necessity κ e))
+
+  | sym (id κ) => Some (id κ)
+  | id κ ∘ id _ => Some (id κ)
+
+  | cast_pos (id κ) (box _ e) => Some (box κ e)
+  | cast_nec (id κ) (necessity _ e) => Some (necessity κ e)
+
+  | app e0 e1 =>
+    if eval e0 is Some e0'
+    then Some (app e0' e1)
+    else None
+
+  | π1 e =>
+    if eval e is Some e'
+    then Some (π1 e')
+    else None
+  | π2 e =>
+    if eval e is Some e'
+    then Some (π2 e')
+    else None
+
+  | ext κ e =>
+    if eval e is Some e'
+    then Some (ext κ e')
+    else None
+
+  | dup e =>
+    if eval e is Some e'
+    then Some (dup e')
+    else None
+
+  | e0 ∘ e1 =>
+    if eval e0 is Some e0'
+    then Some (e0' ∘ e1)
+    else
+      if eval e1 is Some e1'
+      then Some (e0 ∘ e1')
+      else None
+
+  | pos_comm e =>
+    if eval e is Some e'
+    then Some (pos_comm e')
+    else None
+
+  | nec_comm e =>
+    if eval e is Some e'
+    then Some (nec_comm e')
+    else None
+
+  | cast_pos e0 e1 =>
+    if eval e0 is Some e0'
+    then Some (cast_pos e0' e1)
+    else
+      if eval e1 is Some e1'
+      then Some (cast_pos e0 e1')
+      else None
+
+  | cast_nec e0 e1 =>
+    if eval e0 is Some e0'
+    then Some (cast_nec e0' e1)
+    else
+      if eval e1 is Some e1'
+      then Some (cast_nec e0 e1')
+      else None
+
+  | _ => None
+  end.
+
+CoInductive stream A := cons { hd: A ; tl: option (stream A) }.
+
+Arguments cons {A}.
+Arguments hd {A}.
+Arguments tl {A}.
+
+CoFixpoint multieval {α} (e: tm α): stream (tm α) :=
+  cons e (if eval e is Some e' then Some (multieval e') else None).
+
+Inductive evalsto {α} (X: tm α): tm α → Type :=
+| evals_id: evalsto X X
+| evals_step {Y Z}: Some Y = eval X → evalsto Y Z → evalsto X Z.
+Arguments evals_id {α X}.
+Arguments evals_step {α X Y Z}.
