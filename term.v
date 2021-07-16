@@ -58,6 +58,9 @@ Reserved Notation "f ∘ g" (at level 30).
 Inductive tm: Type :=
 | var (x: string)
 
+| set
+| type
+
 | unit
 | prod (A B: tm)
 | exp (s t: tm)
@@ -171,6 +174,25 @@ Inductive judge (Γ: ctx): tm → tm → Type :=
     maps Γ x τ →
     Γ ⊢ var x ∈ τ
 
+| judge_set:
+    Γ ⊢ set ∈ type
+| judge_unit:
+    Γ ⊢ unit ∈ set
+| judge_prod A B:
+    Γ ⊢ A ∈ set → Γ ⊢ B ∈ set →
+    Γ ⊢ prod A B ∈ set
+| judge_exp A B:
+    Γ ⊢ A ∈ set → Γ ⊢ B ∈ set →
+    Γ ⊢ exp A B ∈ set
+| judge_pos κ A:
+    Γ ⊢ A ∈ set →
+    Γ ⊢ ◇ κ, A ∈ set
+| judge_nec κ A:
+    Γ ⊢ A ∈ set →
+    Γ ⊢ □ κ, A ∈ set
+| judge_eq κ0 κ1:
+    Γ ⊢ (κ0 ~ κ1) ∈ set
+
 | judge_tt:
     Γ ⊢ tt ∈ unit
 | judge_fanout e0 e1 τ0 τ1:
@@ -242,12 +264,35 @@ Coercion term: ofty >-> tm.
 
 Fixpoint infer (Γ: ctx) (e: tm): option tm :=
   match e with
-  | unit => None
-  | prod _ _ => None
-  | exp _ _ => None
-  | (◇ _, _) => None
-  | (□ _, _) => None
-  | (_ ~ _) => None
+  | type => None
+
+  | set => Some type
+
+  | unit => Some set
+  | prod A B =>
+    infer Γ A >>= λ A',
+    infer Γ B >>= λ B',
+    (if A' is set then Some tt else None) >>
+    (if B' is set then Some tt else None) >>
+    Some set
+
+  | exp A B =>
+    infer Γ A >>= λ A',
+    infer Γ B >>= λ B',
+    (if A' is set then Some tt else None) >>
+    (if B' is set then Some tt else None) >>
+    Some set
+
+  | (◇ _, A) =>
+    infer Γ A >>= λ A',
+    (if A' is set then Some tt else None) >>
+    Some set
+  | (□ _, A) =>
+    infer Γ A >>= λ A',
+    (if A' is set then Some tt else None) >>
+    Some set
+
+  | (_ ~ _) => Some set
 
   | var x => lookup Γ x
 
@@ -386,6 +431,59 @@ Proof.
   - apply judge_var.
     apply lookup_sound.
     assumption.
+  - inversion p.
+    subst.
+    constructor.
+  - inversion p.
+    subst.
+    constructor.
+  - destruct (infer Γ e1) as [A|] eqn:A', (infer Γ e2) as [B|] eqn:B'.
+    all: try discriminate.
+    destruct A, B.
+    all: try discriminate.
+    cbn in p.
+    inversion p.
+    subst.
+    constructor.
+    + apply IHe1.
+      assumption.
+    + apply IHe2.
+      assumption.
+  - destruct (infer Γ e1) as [A|] eqn:A', (infer Γ e2) as [B|] eqn:B'.
+    all: try discriminate.
+    destruct A, B.
+    all: try discriminate.
+    cbn in p.
+    inversion p.
+    subst.
+    constructor.
+    + apply IHe1.
+      assumption.
+    + apply IHe2.
+      assumption.
+  - destruct (infer Γ e) as [A|] eqn:A'.
+    all: try discriminate.
+    destruct A.
+    all: try discriminate.
+    cbn in p.
+    inversion p.
+    subst.
+    constructor.
+    apply IHe.
+    assumption.
+  - destruct (infer Γ e) as [A|] eqn:A'.
+    all: try discriminate.
+    destruct A.
+    all: try discriminate.
+    cbn in p.
+    inversion p.
+    subst.
+    constructor.
+    apply IHe.
+    assumption.
+  - inversion p.
+    subst.
+    constructor.
   - destruct (infer ((x, e1) :: Γ) e2) eqn:q.
     2: discriminate.
     inversion p.
@@ -715,11 +813,21 @@ Proof.
 Defined.
 
 Variant whnf: tm → Type :=
+| whnf_set: whnf set
+| whnf_type: whnf type
+
+| whnf_unit: whnf unit
+| whnf_prod A B: whnf (prod A B)
+| whnf_exp A B: whnf (exp A B)
+| whnf_pos κ A: whnf (◇ κ, A)
+| whnf_nec κ A: whnf (□ κ, A)
+| whnf_eq κ μ: whnf (κ ~ μ)
+
 | whnf_tt: whnf tt
 | whnf_fanout e0 e1: whnf (fanout e0 e1)
 | whnf_lam x τ e: whnf (lam x τ e)
 | whnf_box κ e: whnf (box κ e)
-| whnf_nec κ e: whnf (necessity κ e)
+| whnf_necessity κ e: whnf (necessity κ e)
 | whnf_id κ: whnf (id κ)
 .
 
@@ -745,6 +853,8 @@ Lemma canonical {v: tm} {τ}:
   | pos κ _ => Σ e, v = box κ e
   | nec κ _ => Σ e, v = necessity κ e
   | eq κ0 κ1 => (κ0 = κ1) ∧ v = id κ0
+  | type => v = set
+  | set => True (* Feels wrong *)
   | _ => (False: Type)
   end.
 Proof.
@@ -800,6 +910,9 @@ Section subst.
     | cast_pos e0 e1 => cast_pos (subst e0) (subst e1)
     | cast_nec e0 e1 => cast_nec (subst e0) (subst e1)
 
+    | set => set
+    | type => type
+
     | unit => unit
     | prod e0 e1 => prod (subst e0) (subst e1)
     | exp e0 e1 => exp (subst e0) (subst e1)
@@ -826,7 +939,6 @@ Proof.
   all: try econstructor.
   all: try eauto.
   - cbn in *.
-    cbn in *.
     destruct (string_dec x x0) eqn:r.
     + cbn in *.
       set (p' := infer_complete p).
