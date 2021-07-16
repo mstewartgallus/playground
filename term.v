@@ -1,11 +1,12 @@
 Require Import Coq.Unicode.Utf8.
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
-Require Import Coq.Vectors.Vector.
 Require Import Coq.Bool.Bool.
 Require Import Coq.Logic.FunctionalExtensionality.
 Require Import Coq.Setoids.Setoid.
 Require Import Coq.Classes.SetoidClass.
+Require Import FunInd.
+Require Import Recdef.
 Require Coq.Structures.OrdersAlt.
 Require Coq.Structures.OrderedTypeEx.
 Require Coq.MSets.MSetAVL.
@@ -111,36 +112,65 @@ Arguments tm: clear implicits.
 
 Infix "∘" := compose.
 
-Definition ctx := string → option sort.
-Definition mt: ctx := λ _, None.
-Definition add x τ (m: ctx): ctx := λ y, if string_dec x y then Some τ else m y.
+Definition ctx := list (string * sort).
 
-Theorem add_add x τ0 τ1 (m: ctx): add x τ0 (add x τ1 m) = add x τ0 m.
-Proof.
-  extensionality y.
-  unfold add.
-  destruct (string_dec x y).
-  all: reflexivity.
-Qed.
+Inductive maps: ctx → string → sort → Prop :=
+| maps_head {Γ x τ}: maps ((x, τ) :: Γ) x τ
+| maps_tail {Γ x y τ τ0}:
+    y ≠ x →
+    maps Γ x τ →
+    maps ((y, τ0) :: Γ) x τ
+.
 
-Theorem add_comm x y τ0 τ1 (m: ctx):
-  x ≠ y →
- add x τ0 (add y τ1 m) = add y τ1 (add x τ0 m).
+Fixpoint lookup (Γ: ctx) (x:string) :=
+  match Γ with
+  | (y, τ) :: Γ' =>
+    if string_dec y x then Some τ else lookup Γ' x
+  | _ => None
+  end.
+
+Theorem lookup_complete {Γ x τ}:
+  maps Γ x τ →
+  lookup Γ x = Some τ.
 Proof.
   intro p.
-  extensionality z.
-  unfold add.
-  destruct (string_dec x z), (string_dec y z).
-  all: try reflexivity.
-  subst.
-  contradiction.
+  induction p.
+  - cbn in *.
+    destruct (string_dec x x).
+    2: contradiction.
+    reflexivity.
+  - cbn in *.
+    destruct (string_dec y x).
+    + subst.
+      contradiction.
+    + assumption.
 Qed.
+
+Theorem lookup_sound {Γ x τ}:
+  lookup Γ x = Some τ →
+  maps Γ x τ.
+Proof.
+  intro p.
+  induction Γ.
+  1: discriminate.
+  destruct a as [y τ'].
+  cbn in p.
+  destruct (string_dec y x).
+  - subst.
+    inversion p.
+    subst.
+    constructor.
+  - constructor.
+    + assumption.
+    + apply IHΓ.
+      assumption.
+Defined.
 
 Reserved Notation "Γ ⊢ e ∈ τ" (at level 80).
 
 Inductive judge (Γ: ctx): tm → sort → Type :=
 | judge_var x τ:
-    Γ x = Some τ →
+    maps Γ x τ →
     Γ ⊢ var x ∈ τ
 
 | judge_tt:
@@ -157,14 +187,14 @@ Inductive judge (Γ: ctx): tm → sort → Type :=
     Γ ⊢ π2 e ∈ τ1
 
 | judge_lam e τ0 τ1 x:
-    add x τ0 Γ ⊢ e ∈ τ1 →
+    (x, τ0) :: Γ ⊢ e ∈ τ1 →
     Γ ⊢ lam x τ0 e ∈ [τ0, τ1]
 | judge_app e0 e1 τ0 τ1:
     Γ ⊢ e0 ∈ [τ0, τ1] → Γ ⊢ e1 ∈ τ0 →
     Γ ⊢ app e0 e1 ∈ τ1
 
 | judge_necessity κ e τ:
-    mt ⊢ e ∈ τ →
+    [] ⊢ e ∈ τ →
     Γ ⊢ necessity κ e ∈ (□ κ, τ)
 
 | judge_ext κ e τ:
@@ -179,7 +209,7 @@ Inductive judge (Γ: ctx): tm → sort → Type :=
     Γ ⊢ box κ e ∈ (◇ κ, τ)
 
 | judge_bind e0 e1 x κ τ0 τ1:
-    Γ ⊢ e0 ∈ (◇ κ, τ0) → add x τ0 Γ ⊢ e1 ∈ (◇ κ, τ1) →
+    Γ ⊢ e0 ∈ (◇ κ, τ0) → (x, τ0) :: Γ ⊢ e1 ∈ (◇ κ, τ1) →
     Γ ⊢ bind e0 x e1 ∈ (◇ κ, τ1)
 
 | judge_id κ:
@@ -205,21 +235,25 @@ where "Γ ⊢ e ∈ τ" := (judge Γ e τ).
 
 Record ofty (τ: sort) := {
   term: tm ;
-  proof: mt ⊢ term ∈ τ ;
+  proof: [] ⊢ term ∈ τ ;
 }.
+
+Arguments term {τ}.
+Arguments proof {τ}.
+Coercion term: ofty >-> tm.
 
 Fixpoint infer (Γ: ctx) (e: tm): option sort :=
   match e with
-  | var x => Γ x
+  | var x => lookup Γ x
 
   | lam x τ0 e =>
-    infer (add x τ0 Γ) e >>= λ τ1,
+    infer ((x, τ0) :: Γ) e >>= λ τ1,
     Some [τ0, τ1]
 
   | app e0 e1 =>
     infer Γ e0 >>= λ A,
-    (if A is [τ0, τ1] then Some (τ0, τ1) else None) >>= λ '(τ0, τ1),
     infer Γ e1 >>= λ τ0',
+    (if A is [τ0, τ1] then Some (τ0, τ1) else None) >>= λ '(τ0, τ1),
     (if sort_eq τ0 τ0' then Some tt else None) >>
     Some τ1
 
@@ -243,7 +277,7 @@ Fixpoint infer (Γ: ctx) (e: tm): option sort :=
     else None
 
   | necessity κ e =>
-    infer mt e >>= λ τ,
+    infer [] e >>= λ τ,
     Some (□ κ, τ)
 
   | ext κ e =>
@@ -263,7 +297,7 @@ Fixpoint infer (Γ: ctx) (e: tm): option sort :=
   | bind e0 x e1 =>
     infer Γ e0 >>= λ A,
     (if A is (◇ κ0, τ0) then Some (κ0, τ0) else None) >>= λ '(κ0, τ0),
-    infer (add x τ0 Γ) e1 >>= λ B,
+    infer ((x, τ0) :: Γ) e1 >>= λ B,
     (if B is (◇ κ1, τ1) then Some (κ1, τ1) else None) >>= λ '(κ1, τ1),
     (if string_dec κ0 κ1 then Some tt else None) >>
     Some (◇ κ1, τ1)
@@ -299,6 +333,42 @@ Fixpoint infer (Γ: ctx) (e: tm): option sort :=
     Some (□ κ1, τ)
   end.
 
+Theorem infer_complete {Γ e τ}:
+  Γ ⊢ e ∈ τ → infer Γ e = Some τ.
+  intro p.
+  induction p.
+  all: cbn in *.
+  all: auto.
+  all: try rewrite IHp.
+  all: cbn in *.
+  all: try rewrite IHp1.
+  all: cbn in *.
+  all: try rewrite IHp2.
+  all: cbn in *.
+  all: try reflexivity.
+  all: cbn in *.
+  - apply lookup_complete.
+    assumption.
+  - destruct (sort_eq τ0 τ0).
+    2: contradiction.
+    reflexivity.
+  - destruct (string_dec κ κ).
+    2: contradiction.
+    reflexivity.
+  - destruct (string_dec κ κ).
+    2: contradiction.
+    reflexivity.
+  - destruct (string_dec κ1 κ1).
+    2: contradiction.
+    reflexivity.
+  - destruct (string_dec κ0 κ0).
+    2: contradiction.
+    reflexivity.
+  - destruct (string_dec κ0 κ0).
+    2: contradiction.
+    reflexivity.
+Qed.
+
 Theorem infer_sound {Γ e τ}:
   infer Γ e = Some τ → Γ ⊢ e ∈ τ.
 Proof.
@@ -308,8 +378,9 @@ Proof.
   all: intros τ Γ p.
   all: cbn in *.
   - apply judge_var.
+    apply lookup_sound.
     assumption.
-  - destruct (infer (add x s Γ) e) eqn:q.
+  - destruct (infer ((x, s) :: Γ) e) eqn:q.
     2: discriminate.
     inversion p.
     subst.
@@ -319,20 +390,20 @@ Proof.
   - destruct (infer Γ e1) eqn:q1.
     all: try discriminate.
     cbn in *.
-    destruct s.
-    all: try discriminate.
-    cbn in *.
     destruct (infer Γ e2) eqn:q2.
     all: try discriminate.
     cbn in *.
-    destruct (sort_eq s1 s).
+    destruct s.
+    all: try discriminate.
+    cbn in *.
+    destruct (sort_eq s1 s0).
     all: try discriminate.
     cbn in *.
     inversion p.
     subst.
     eapply judge_app.
     Unshelve.
-    3: apply s.
+    3: apply s0.
     + apply IHe1.
       apply q1.
     + apply IHe2.
@@ -373,7 +444,7 @@ Proof.
     subst.
     apply IHe.
     assumption.
-  - destruct (infer mt e) eqn:q.
+  - destruct (infer [] e) eqn:q.
     all: try discriminate.
     inversion p.
     subst.
@@ -416,7 +487,7 @@ Proof.
     destruct s.
     all: try discriminate.
     cbn in *.
-    destruct (infer (add x s Γ) e2) eqn:q2.
+    destruct (infer ((x, s) :: Γ) e2) eqn:q2.
     all: try discriminate.
     cbn in *.
     destruct s0.
@@ -522,43 +593,9 @@ Proof.
       assumption.
 Defined.
 
-Theorem infer_complete {Γ e τ}:
-  Γ ⊢ e ∈ τ → infer Γ e = Some τ.
-  intro p.
-  induction p.
-  all: cbn in *.
-  all: auto.
-  all: try rewrite IHp.
-  all: cbn in *.
-  all: try rewrite IHp1.
-  all: cbn in *.
-  all: try rewrite IHp2.
-  all: cbn in *.
-  all: try reflexivity.
-  all: cbn in *.
-  - destruct (sort_eq τ0 τ0).
-    2: contradiction.
-    reflexivity.
-  - destruct (string_dec κ κ).
-    2: contradiction.
-    reflexivity.
-  - destruct (string_dec κ κ).
-    2: contradiction.
-    reflexivity.
-  - destruct (string_dec κ1 κ1).
-    2: contradiction.
-    reflexivity.
-  - destruct (string_dec κ0 κ0).
-    2: contradiction.
-    reflexivity.
-  - destruct (string_dec κ0 κ0).
-    2: contradiction.
-    reflexivity.
-Qed.
-
-Definition typed (e: tm): if infer mt e is Some τ then ofty τ else True.
+Definition typed (e: tm): if infer [] e is Some τ then ofty τ else True.
 Proof.
-  destruct (infer mt e) eqn:q.
+  destruct (infer [] e) eqn:q.
   - exists e.
     apply infer_sound.
     assumption.
@@ -571,32 +608,62 @@ Example compose_typed: ofty _ := typed (id "κ" ∘ id "κ").
 Example id_tt: ofty _ := typed (app (lam "x" unit (var "x")) tt).
 
 Definition includes (Γ Δ: ctx): Prop :=
-  ∀ x τ, Δ x = Some τ → Γ x = Some τ.
+  ∀ x τ, maps Δ x τ → maps Γ x τ.
 
 Notation "Γ ⊑ Δ" := (includes Γ Δ) (at level 90).
 
 Instance include_refl: Reflexive includes.
 Proof.
   intros ? ? ? ?.
-  auto.
+  assumption.
 Qed.
 
 Instance include_trans: Transitive includes.
 Proof.
   intros ? ? ? p q ? ? ?.
-  unfold includes in p, q.
+  unfold includes in *.
   apply p.
   apply q.
   auto.
 Qed.
 
-Theorem weakest {Γ: ctx}: Γ ⊑ mt.
+Theorem weakest {Γ: ctx}: Γ ⊑ [].
 Proof.
-  intros ? ? ?.
-  discriminate.
+  intros ? ? p.
+  inversion p.
 Qed.
 
-Theorem weaken {Γ Δ} {e: tm} {τ}:
+Close Scope string_scope.
+
+(* Lemma weaken {x τ Γ}: (x, τ) :: Γ ⊑ [(x, τ)]. *)
+(* Proof. *)
+(*   intros ? ? p. *)
+(*   induction Γ. *)
+(*   1: assumption. *)
+(*   cbn in *. *)
+(*   inversion p. *)
+(*   all: subst. *)
+(*   - inversion IHΓ. *)
+(*     all: subst. *)
+(*     + constructor. *)
+(*     + constructor. *)
+(*   - inversion p. *)
+(*     all: subst. *)
+(*     all: constructor. *)
+(*     all: auto. *)
+(*     inversion IHΓ. *)
+(*     all: subst. *)
+(*     all: try contradiction. *)
+    
+    
+(*   cbn in *. *)
+(*   destruct (string_dec x x0). *)
+(*   - subst. *)
+(*     reflexivity. *)
+(*   - contradiction. *)
+(* Qed. *)
+
+Theorem weaken_judge {Γ Δ} {e: tm} {τ}:
     Γ ⊑ Δ →
     Δ ⊢ e ∈ τ → Γ ⊢ e ∈ τ.
 Proof.
@@ -607,16 +674,39 @@ Proof.
   all: econstructor.
   all: eauto.
   - apply IHty.
-    unfold add.
     intros ? ? ?.
-    destruct (string_dec x x0).
-    all: auto.
+    apply lookup_sound.
+    destruct (string_dec x x0) eqn:q.
+    all: subst.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in *.
+      assumption.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in *.
+      apply lookup_complete.
+      apply p.
+      apply lookup_sound.
+      assumption.
   - apply IHty2.
-    unfold add.
     intros ? ? ?.
-    destruct (string_dec x x0).
-    all: auto.
-Qed.
+    apply lookup_sound.
+    cbn.
+    destruct (string_dec x x0) eqn:q.
+    all: subst.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in p'.
+      assumption.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in p'.
+      apply lookup_complete.
+      apply p.
+      apply lookup_sound.
+      assumption.
+Defined.
 
 Variant whnf: tm → Type :=
 | whnf_tt: whnf tt
@@ -641,7 +731,7 @@ Variant cd: tm → Type :=
 .
 
 Lemma canonical {v: tm} {τ}:
-  mt ⊢ v ∈ τ → whnf v →
+  [] ⊢ v ∈ τ → whnf v →
   match τ with
   | unit => (v = tt: Type)
   | prod _ _ => Σ e0 e1, v = fanout e0 e1
@@ -697,7 +787,7 @@ Section subst.
     | box κ e => box κ (subst e)
 
     | id κ => id κ
-    | e0 ∘ e1 =>  (subst e0) ∘ (subst e1)
+    | e0 ∘ e1 => (subst e0) ∘ (subst e1)
     | sym e => sym (subst e)
 
     | cast_pos e0 e1 => cast_pos (subst e0) (subst e1)
@@ -708,8 +798,8 @@ End subst.
 Notation "'[' x ':=' s ']' t" := (subst x s t) .
 
 Theorem subst_type {Γ x} {e0 e1: tm} {τ0 τ1}:
-  add x τ1 Γ ⊢ e0 ∈ τ0 →
-  mt ⊢ e1 ∈ τ1 →
+  (x, τ1) :: Γ ⊢ e0 ∈ τ0 →
+  nil ⊢ e1 ∈ τ1 →
   Γ ⊢ [x:=e1]e0 ∈ τ0.
 Proof.
   intros p q.
@@ -721,54 +811,117 @@ Proof.
   all: subst.
   all: try econstructor.
   all: try eauto.
-  - cbn.
+  - cbn in *.
+    cbn in *.
     destruct (string_dec x x0) eqn:r.
     + cbn in *.
       set (p' := infer_complete p).
-      unfold add in p'.
       cbn in *.
+      subst.
       rewrite r in p'.
       cbn in *.
+      subst.
       inversion p'.
       subst.
-      refine (weaken _ q).
-      intros ? ? ?.
-      unfold mt in *.
-      discriminate.
+      refine (weaken_judge _ q).
+      apply weakest.
     + cbn in *.
       set (p' := infer_complete p).
-      unfold add in p'.
       cbn in *.
       rewrite r in p'.
       apply judge_var.
-      auto.
+      apply lookup_sound.
+      assumption.
   - cbn in *.
     destruct (string_dec x x0).
     + subst.
       apply judge_lam.
-      rewrite add_add in H3.
-      assumption.
+      refine (weaken_judge _ H3).
+      intros ? ? ?.
+      apply lookup_sound.
+      destruct (string_dec x0 x) eqn:t.
+      all: subst.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        cbn in *.
+        assumption.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        cbn in *.
+        assumption.
     + apply judge_lam.
       apply IHe0.
-      rewrite add_comm.
-      1: assumption.
-      assumption.
+      refine (weaken_judge _ H3).
+      intros ? ? ?.
+      apply lookup_sound.
+      cbn.
+      destruct (string_dec x x1) eqn:t, (string_dec x0 x1) eqn:u.
+      all: subst.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        contradiction.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        rewrite u in *.
+        assumption.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        rewrite u in *.
+        assumption.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        rewrite u in *.
+        assumption.
   - cbn.
     apply IHe0.
-    refine (weaken _ H2).
+    refine (weaken_judge _ H2).
     intros ? ? ?.
-    unfold mt in *.
-    discriminate.
-  - cbn.
-    destruct (string_dec x x0).
+    inversion H.
+  - destruct (string_dec x x0).
     + subst.
-      rewrite add_add in H4.
-      auto.
+      refine (weaken_judge _ H4).
+      intros ? ? ?.
+      apply lookup_sound.
+      destruct (string_dec x0 x) eqn:t.
+      all: subst.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        cbn in *.
+        assumption.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        cbn in *.
+        assumption.
     + apply IHe0_2.
-      rewrite add_comm in H4.
-      2: auto.
-      auto.
-Qed.
+      cbn in *.
+      refine (weaken_judge _ H4).
+      intros ? ? ?.
+      apply lookup_sound.
+      cbn in *.
+      destruct (string_dec x x1) eqn:t.
+      all: subst.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        cbn in *.
+        destruct (string_dec x0 x1).
+        all: auto.
+        subst.
+        contradiction.
+      * set (r := lookup_complete H).
+        cbn in *.
+        rewrite t in *.
+        cbn in *.
+        assumption.
+Defined.
 
 Reserved Notation "t '~>' t'" (at level 40).
 
@@ -853,11 +1006,85 @@ Proof.
   all: constructor.
 Defined.
 
+
+Fixpoint eval (e: tm): option tm :=
+  match e with
+  | app (lam x _ e0) e1 => Some ([x := e1] e0)
+  | bind (box _ e0) x e1 => Some ([x := e0] e1)
+
+  | π1 (fanout e0 _) => Some e0
+  | π2 (fanout _ e1) => Some e1
+
+  | ext _ (necessity _ e) => Some e
+  | dup (necessity κ e) => Some (necessity κ (necessity κ e))
+
+  | sym (id κ) => Some (id κ)
+  | id κ ∘ id _ => Some (id κ)
+
+  | cast_pos (id κ) (box _ e) => Some (box κ e)
+  | cast_nec (id κ) (necessity _ e) => Some (necessity κ e)
+
+  | app e0 e1 =>
+    eval e0 >>= λ e0',
+    Some (app e0' e1)
+
+  | π1 e =>
+    eval e >>= λ e',
+    Some (π1 e')
+  | π2 e =>
+    eval e >>= λ e',
+    Some (π2 e')
+
+  | ext κ e =>
+    eval e >>= λ e',
+    Some (ext κ e')
+
+  | dup e =>
+    eval e >>= λ e',
+    Some (dup e')
+
+  | e0 ∘ e1 =>
+    if eval e0 is Some e0'
+    then Some (e0' ∘ e1)
+    else
+      if eval e1 is Some e1'
+      then Some (e0 ∘ e1')
+      else None
+
+  | cast_pos e0 e1 =>
+    if eval e0 is Some e0'
+    then Some (cast_pos e0' e1)
+    else
+      if eval e1 is Some e1'
+      then Some (cast_pos e0 e1')
+      else None
+
+  | cast_nec e0 e1 =>
+    if eval e0 is Some e0'
+    then Some (cast_nec e0' e1)
+    else
+      if eval e1 is Some e1'
+      then Some (cast_nec e0 e1')
+      else None
+
+  | _ => None
+  end.
+
+Lemma eval_code {e e'}:
+  eval e = Some e' → cd e.
+Proof.
+  intro p.
+  induction e.
+  all: cbn in p.
+  all: try discriminate.
+  all: constructor.
+Defined.
+
 Theorem progress (e: tm) {τ}:
-  mt ⊢ e ∈ τ →
+  nil ⊢ e ∈ τ →
   whnf e + (Σ e', e ~> e').
 Proof.
-  remember mt as Γ.
+  remember nil as Γ.
   intro p.
   induction p.
   all: subst.
@@ -866,6 +1093,9 @@ Proof.
   all: try destruct (IHp eq_refl).
   all: try destruct (IHp1 eq_refl).
   all: try destruct (IHp2 eq_refl).
+  - set (p := lookup_complete m).
+    cbn in *.
+    discriminate.
   - right.
     destruct (canonical p w) as [A T].
     destruct T as [B T].
@@ -1019,10 +1249,10 @@ Defined.
 
 Theorem preservation (e e': tm) τ:
     e ~> e' →
-    mt ⊢ e ∈ τ →
-    mt ⊢ e' ∈ τ.
+    nil ⊢ e ∈ τ →
+    nil ⊢ e' ∈ τ.
 Proof.
-  remember mt as Γ.
+  remember nil as Γ.
   intros st.
   generalize dependent τ.
   induction st.
@@ -1112,73 +1342,18 @@ Proof.
     all: auto.
 Defined.
 
-Inductive multistep (X: tm): tm → Type :=
-| halt: multistep X X
-| andthen {Y Z}: X ~> Y → multistep Y Z → multistep X Z.
-Arguments halt {X}.
-Arguments andthen {X Y Z}.
+CoInductive trace {τ} (X: ofty τ): Type :=
+| halt: whnf X → trace X
+| andthen (Y: ofty τ): X ~> Y → trace Y → trace X.
 
-Notation "A ~>* B" := (multistep A B) (at level 90).
+Arguments halt {τ X}.
+Arguments andthen {τ X}.
 
-Fixpoint eval (e: tm): option tm :=
-  match e with
-  | app (lam x _ e0) e1 => Some ([x := e1] e0)
-  | bind (box _ e0) x e1 => Some ([x := e0] e1)
-
-  | π1 (fanout e0 _) => Some e0
-  | π2 (fanout _ e1) => Some e1
-
-  | ext _ (necessity _ e) => Some e
-  | dup (necessity κ e) => Some (necessity κ (necessity κ e))
-
-  | sym (id κ) => Some (id κ)
-  | id κ ∘ id _ => Some (id κ)
-
-  | cast_pos (id κ) (box _ e) => Some (box κ e)
-  | cast_nec (id κ) (necessity _ e) => Some (necessity κ e)
-
-  | app e0 e1 =>
-    eval e0 >>= λ e0',
-    Some (app e0' e1)
-
-  | π1 e =>
-    eval e >>= λ e',
-    Some (π1 e')
-  | π2 e =>
-    eval e >>= λ e',
-    Some (π2 e')
-
-  | ext κ e =>
-    eval e >>= λ e',
-    Some (ext κ e')
-
-  | dup e =>
-    eval e >>= λ e',
-    Some (dup e')
-
-  | e0 ∘ e1 =>
-    if eval e0 is Some e0'
-    then Some (e0' ∘ e1)
-    else
-      if eval e1 is Some e1'
-      then Some (e0 ∘ e1')
-      else None
-
-  | cast_pos e0 e1 =>
-    if eval e0 is Some e0'
-    then Some (cast_pos e0' e1)
-    else
-      if eval e1 is Some e1'
-      then Some (cast_pos e0 e1')
-      else None
-
-  | cast_nec e0 e1 =>
-    if eval e0 is Some e0'
-    then Some (cast_nec e0' e1)
-    else
-      if eval e1 is Some e1'
-      then Some (cast_nec e0 e1')
-      else None
-
-  | _ => None
+CoFixpoint multistep {τ} (X: ofty τ): trace X :=
+  match progress X (proof X) with
+  | inl e => halt e
+  | inr s => andthen {| term := head s |} (tail s) (multistep
+                     {| term := head s ;
+                        proof := preservation X (head s) τ (tail s) (proof X) |})
   end.
+
