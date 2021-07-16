@@ -53,37 +53,21 @@ Definition option_then {A B} (x: option A) (y: option B): option B :=
 
 Infix ">>" := option_then (at level 30, right associativity).
 
-Inductive sort :=
-| unit
-| prod (A B: sort)
-| exp (s t: sort)
-| pos (κ: string) (A: sort)
-| nec (κ: string) (A: sort)
-| eq (κ μ: string).
-
-Notation "[ A , B ]" := (exp A B).
-Infix "×" := prod (at level 50).
-
-Notation "'◇' κ , A" := (pos κ A) (at level 200).
-(* Like forall but I use box because ∀ is already taken *)
-Notation "□ κ , A" := (nec κ A) (at level 200).
-Infix "~" := eq (at level 90).
-
 Reserved Notation "f ∘ g" (at level 30).
-
-Definition sort_eq (x y: sort): {x = y} + {x ≠ y}.
-Proof.
-  set (s := string_dec).
-  decide equality.
-Defined.
-
-(* Strings are really dumb but I don't want to figure out two things
-at the same time *)
 
 Inductive tm: Type :=
 | var (x: string)
 
-| lam (x: string) (s: sort) (e: tm)
+| unit
+| prod (A B: tm)
+| exp (s t: tm)
+
+| pos (κ: string) (A: tm)
+| nec (κ: string) (A: tm)
+
+| eq (κ μ: string)
+
+| lam (x: string) (s: tm) (e: tm)
 | app (f x: tm)
 
 | tt
@@ -110,11 +94,25 @@ Inductive tm: Type :=
 
 Arguments tm: clear implicits.
 
+Notation "[ A , B ]" := (exp A B).
+Infix "×" := prod (at level 50).
+
+Notation "'◇' κ , A" := (pos κ A) (at level 200).
+(* Like forall but I use box because ∀ is already taken *)
+Notation "□ κ , A" := (nec κ A) (at level 200).
+Infix "~" := eq (at level 90).
+
 Infix "∘" := compose.
 
-Definition ctx := list (string * sort).
+Definition tm_eq (x y: tm): {x = y} + {x ≠ y}.
+Proof.
+  set (s := string_dec).
+  decide equality.
+Defined.
 
-Inductive maps: ctx → string → sort → Prop :=
+Definition ctx := list (string * tm).
+
+Inductive maps: ctx → string → tm → Prop :=
 | maps_head {Γ x τ}: maps ((x, τ) :: Γ) x τ
 | maps_tail {Γ x y τ τ0}:
     y ≠ x →
@@ -168,7 +166,7 @@ Defined.
 
 Reserved Notation "Γ ⊢ e ∈ τ" (at level 80).
 
-Inductive judge (Γ: ctx): tm → sort → Type :=
+Inductive judge (Γ: ctx): tm → tm → Type :=
 | judge_var x τ:
     maps Γ x τ →
     Γ ⊢ var x ∈ τ
@@ -233,7 +231,7 @@ Inductive judge (Γ: ctx): tm → sort → Type :=
     Γ ⊢ cast_nec e0 e1 ∈ (□ κ1, τ)
 where "Γ ⊢ e ∈ τ" := (judge Γ e τ).
 
-Record ofty (τ: sort) := {
+Record ofty (τ: tm) := {
   term: tm ;
   proof: [] ⊢ term ∈ τ ;
 }.
@@ -242,8 +240,15 @@ Arguments term {τ}.
 Arguments proof {τ}.
 Coercion term: ofty >-> tm.
 
-Fixpoint infer (Γ: ctx) (e: tm): option sort :=
+Fixpoint infer (Γ: ctx) (e: tm): option tm :=
   match e with
+  | unit => None
+  | prod _ _ => None
+  | exp _ _ => None
+  | (◇ _, _) => None
+  | (□ _, _) => None
+  | (_ ~ _) => None
+
   | var x => lookup Γ x
 
   | lam x τ0 e =>
@@ -254,7 +259,7 @@ Fixpoint infer (Γ: ctx) (e: tm): option sort :=
     infer Γ e0 >>= λ A,
     infer Γ e1 >>= λ τ0',
     (if A is [τ0, τ1] then Some (τ0, τ1) else None) >>= λ '(τ0, τ1),
-    (if sort_eq τ0 τ0' then Some tt else None) >>
+    (if tm_eq τ0 τ0' then Some tt else None) >>
     Some τ1
 
   | tt => Some unit
@@ -349,7 +354,7 @@ Theorem infer_complete {Γ e τ}:
   all: cbn in *.
   - apply lookup_complete.
     assumption.
-  - destruct (sort_eq τ0 τ0).
+  - destruct (tm_eq τ0 τ0).
     2: contradiction.
     reflexivity.
   - destruct (string_dec κ κ).
@@ -377,15 +382,16 @@ Proof.
   induction e.
   all: intros τ Γ p.
   all: cbn in *.
+  all: try discriminate.
   - apply judge_var.
     apply lookup_sound.
     assumption.
-  - destruct (infer ((x, s) :: Γ) e) eqn:q.
+  - destruct (infer ((x, e1) :: Γ) e2) eqn:q.
     2: discriminate.
     inversion p.
     subst.
     apply judge_lam.
-    apply IHe.
+    apply IHe2.
     apply q.
   - destruct (infer Γ e1) eqn:q1.
     all: try discriminate.
@@ -393,17 +399,17 @@ Proof.
     destruct (infer Γ e2) eqn:q2.
     all: try discriminate.
     cbn in *.
-    destruct s.
+    destruct t.
     all: try discriminate.
     cbn in *.
-    destruct (sort_eq s1 s0).
+    destruct (tm_eq t1 t0).
     all: try discriminate.
     cbn in *.
     inversion p.
     subst.
     eapply judge_app.
     Unshelve.
-    3: apply s0.
+    3: apply t0.
     + apply IHe1.
       apply q1.
     + apply IHe2.
@@ -424,22 +430,22 @@ Proof.
       assumption.
   - destruct (infer Γ e) eqn:q.
     all: try discriminate.
-    destruct s.
+    destruct t.
     all: try discriminate.
     eapply judge_π1.
     Unshelve.
-    2: apply s2.
+    2: apply t2.
     inversion p.
     subst.
     apply IHe.
     assumption.
   - destruct (infer Γ e) eqn:q.
     all: try discriminate.
-    destruct s.
+    destruct t.
     all: try discriminate.
     eapply judge_π2.
     Unshelve.
-    2: apply s1.
+    2: apply t1.
     inversion p.
     subst.
     apply IHe.
@@ -454,7 +460,7 @@ Proof.
   - destruct (infer Γ e) eqn:q.
     all: try discriminate.
     cbn in *.
-    destruct s.
+    destruct t.
     all: try discriminate.
     cbn in *.
     destruct (string_dec κ κ0).
@@ -467,7 +473,7 @@ Proof.
     assumption.
   - destruct (infer Γ e) eqn:q.
     all: try discriminate.
-    destruct s.
+    destruct t.
     all: try discriminate.
     inversion p.
     subst.
@@ -484,13 +490,13 @@ Proof.
   - destruct (infer Γ e1) eqn:q1.
     all: try discriminate.
     cbn in *.
-    destruct s.
+    destruct t.
     all: try discriminate.
     cbn in *.
-    destruct (infer ((x, s) :: Γ) e2) eqn:q2.
+    destruct (infer ((x, t) :: Γ) e2) eqn:q2.
     all: try discriminate.
     cbn in *.
-    destruct s0.
+    destruct t0.
     all: try discriminate.
     cbn in *.
     destruct (string_dec κ κ0).
@@ -500,7 +506,7 @@ Proof.
     subst.
     eapply judge_bind.
     Unshelve.
-    3: apply s.
+    3: apply t.
     + apply IHe1.
       assumption.
     + apply IHe2.
@@ -514,11 +520,11 @@ Proof.
     destruct (infer Γ e2) eqn:q2.
     all: try discriminate.
     cbn in *.
-    destruct s.
+    destruct t.
     cbn in *.
     all: try discriminate.
     cbn in *.
-    destruct s0.
+    destruct t0.
     all: try discriminate.
     cbn in *.
     destruct (string_dec κ μ0).
@@ -536,7 +542,7 @@ Proof.
   - destruct (infer Γ e) eqn:q.
     all: try discriminate.
     cbn in *.
-    destruct s.
+    destruct t.
     all: try discriminate.
     cbn in *.
     inversion p.
@@ -550,10 +556,10 @@ Proof.
     destruct (infer Γ e2) eqn:q2.
     all: try discriminate.
     cbn in *.
-    destruct s.
+    destruct t.
     all: try discriminate.
     cbn in *.
-    destruct s0.
+    destruct t0.
     all: try discriminate.
     cbn in *.
     destruct (string_dec κ κ0).
@@ -574,10 +580,10 @@ Proof.
     destruct (infer Γ e2) eqn:q2.
     all: try discriminate.
     cbn in *.
-    destruct s.
+    destruct t.
     all: try discriminate.
     cbn in *.
-    destruct s0.
+    destruct t0.
     all: try discriminate.
     cbn in *.
     destruct (string_dec κ κ0).
@@ -739,6 +745,7 @@ Lemma canonical {v: tm} {τ}:
   | pos κ _ => Σ e, v = box κ e
   | nec κ _ => Σ e, v = necessity κ e
   | eq κ0 κ1 => (κ0 = κ1) ∧ v = id κ0
+  | _ => (False: Type)
   end.
 Proof.
   intros p w.
@@ -792,6 +799,13 @@ Section subst.
 
     | cast_pos e0 e1 => cast_pos (subst e0) (subst e1)
     | cast_nec e0 e1 => cast_nec (subst e0) (subst e1)
+
+    | unit => unit
+    | prod e0 e1 => prod (subst e0) (subst e1)
+    | exp e0 e1 => exp (subst e0) (subst e1)
+    | (◇ κ, e) => ◇ κ, (subst e)
+    | (□ κ, e) => □ κ, (subst e)
+    | (κ ~ μ) => κ ~ μ
     end.
 End subst.
 
@@ -852,7 +866,7 @@ Proof.
         cbn in *.
         assumption.
     + apply judge_lam.
-      apply IHe0.
+      apply IHe0_2.
       refine (weaken_judge _ H3).
       intros ? ? ?.
       apply lookup_sound.
@@ -1356,4 +1370,3 @@ CoFixpoint multistep {τ} (X: ofty τ): trace X :=
                      {| term := head s ;
                         proof := preservation X (head s) τ (tail s) (proof X) |})
   end.
-
