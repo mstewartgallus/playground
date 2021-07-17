@@ -58,6 +58,7 @@
      (e ∘ e)
      (sym e)
      (cast e e)
+     (J e κ κ e)
      
      (e + e)
      (e - e)
@@ -159,21 +160,6 @@
     -------------------------
    (types (p ...) (let (x e_0) e_1) (Σ κ τ_1))]
 
-  ; Experiment with putting assumptions in the context?
-  [(types ([given κ] p ...) e τ)
-   -------------------------
-   (types (p ...) (assuming κ e) (Σ κ τ))]
-  [(types (p ...) e (Σ κ τ))
-   -------------------------
-   (types ([given κ] p ...) (unbox κ e) τ)]
-
-  [(types (p ...) e τ)
-   -------------------------
-   (types ([given κ] p ...) (tauto κ e) (∀ κ τ))]
-  [(types ([given κ] p ...) e (∀ κ τ))
-   -------------------------
-   (types (p ...) (assumes-nothing κ e) τ)]
-
   ; Commutativity of existentials/universals
    
   [(types Γ e (∀ κ_1 (∀ κ_0 τ)))
@@ -200,6 +186,12 @@
    -------------------------
    (types Γ (cast e_0 e_1) (Σ κ_1 τ))]
 
+  ; Experiment with axiom J
+  [(types ((x : (Σ κ_1 (κ_0 = κ_1))) p ...) e_0 (Σ κ_0 τ))
+   (types (p ...) e_1 (κ_0 = κ_1))  
+   -------------------------
+   (types (p ...) (J e_0 κ_0 κ_1 e_1) (Σ κ_1 τ))]
+  
   ; Some basic integer extras
   [-------------------------
    (types Γ integer Z)]
