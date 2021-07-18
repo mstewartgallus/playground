@@ -81,11 +81,8 @@ Inductive tm: Type :=
 | bind (e0: tm) (x: string) (e1: tm)
 
 | id (κ: string)
-| compose (e0 e1: tm)
-| sym (e: tm)
 
-| cast_pos (e0 e1: tm)
-| cast_nec (e0 e1: tm)
+| J (e0 e1: tm)
 .
 
 Arguments tm: clear implicits.
@@ -97,8 +94,6 @@ Notation "'◇' κ , A" := (pos κ A) (at level 200).
 (* Like forall but I use box because ∀ is already taken *)
 Notation "□ κ , A" := (nec κ A) (at level 200).
 Infix "~" := eq (at level 90).
-
-Infix "∘" := compose.
 
 Definition tm_eq (x y: tm): {x = y} + {x ≠ y}.
 Proof.
@@ -141,11 +136,8 @@ Function subst x s (ev: tm): tm :=
   | box κ e => box κ (subst x s e)
 
   | id κ => id κ
-  | e0 ∘ e1 => (subst x s e0) ∘ (subst x s e1)
-  | sym e => sym (subst x s e)
 
-  | cast_pos e0 e1 => cast_pos (subst x s e0) (subst x s e1)
-  | cast_nec e0 e1 => cast_nec (subst x s e0) (subst x s e1)
+  | J e0 e1 => J (subst x s e0) (subst x s e1)
 
   | set => set
   | type => type
@@ -156,6 +148,48 @@ Function subst x s (ev: tm): tm :=
   | (◇ κ, e) => ◇ κ, (subst x s e)
   | (□ κ, e) => □ κ, (subst x s e)
   | (κ ~ μ) => κ ~ μ
+  end.
+
+Notation "'[' x ':=' s ']' t" := (subst x s t) .
+
+Definition pick (x: string) (s: string) (κ: string) :=
+  if string_dec x κ then s else κ.
+
+Function substk (x: string) (s: string) (ev: tm): tm :=
+  match ev with
+  | var _ => ev
+
+  | lam y τ e => lam y (substk x s τ) (substk x s e)
+  | bind e0 y e1 => bind (substk x s e0) y (substk x s e1)
+
+  | tt => ev
+
+  | app e0 e1 => app (substk x s e0) (substk x s e1)
+
+  | fanout e0 e1 => fanout (substk x s e0) (substk x s e1)
+  | π1 e => π1 (substk x s e)
+  | π2 e => π2 (substk x s e)
+
+  | necessity κ e => necessity κ (substk x s e)
+
+  | ext κ e => ext (pick x s κ) (substk x s e)
+  | dup e => dup (substk x s e)
+
+  | box κ e => box (pick x s κ) (substk x s e)
+
+  | id κ => id (pick x s κ)
+
+  | J e0 e1 => J (substk x s e0) (substk x s e1)
+
+  | set => set
+  | type => type
+
+  | unit => unit
+  | prod e0 e1 => prod (substk x s e0) (substk x s e1)
+  | exp e0 e1 => exp (substk x s e0) (substk x s e1)
+  | (◇ κ, e) => ◇ (pick x s κ), (substk x s e)
+  | (□ κ, e) => □ (pick x s κ), (substk x s e)
+  | (κ ~ μ) => pick x s κ ~ pick x s μ
   end.
 
 Notation "'[' x ':=' s ']' t" := (subst x s t) .
@@ -179,15 +213,8 @@ Inductive step: tm → tm → Type :=
 | step_dup_necessity κ e:
     dup (necessity κ e) ~> necessity κ (necessity κ e)
 
-| step_sym_id κ:
-    sym (id κ) ~> id κ
-| step_compose_id κ:
-    id κ ∘ id κ ~> id κ
-
-| step_cast_pos_id_box κ e:
-    cast_pos (id κ) (box κ e) ~> box κ e
-| step_cast_nec_id_box κ e:
-    cast_nec (id κ) (necessity κ e) ~> necessity κ e
+| step_J_id κ e:
+    J (id κ) e ~> e
 
 | step_bind e0 x e1 e0':
     e0 ~> e0' →
@@ -210,30 +237,9 @@ Inductive step: tm → tm → Type :=
      e ~> e' →
     dup e ~> dup e'
 
-| step_compose_l e0 e0' e1:
+| step_J e0 e1 e0':
     e0 ~> e0' →
-    e0 ∘ e1 ~> e0' ∘ e1
-| step_compose_r e0 e1 e1':
-    e1 ~> e1' →
-    e0 ∘ e1 ~> e0 ∘ e1'
-
-| step_sym e e':
-    e ~> e' →
-    sym e ~> sym e'
-
-| step_cast_pos_l e0 e1 e0':
-    e0 ~> e0' →
-    cast_pos e0 e1 ~> cast_pos e0' e1
-| step_cast_pos_r e0 e1 e1':
-    e1 ~> e1' →
-    cast_pos e0 e1 ~> cast_pos e0 e1'
-
-| step_cast_nec_l e0 e1 e0':
-    e0 ~> e0' →
-    cast_nec e0 e1 ~> cast_nec e0' e1
-| step_cast_nec_r e0 e1 e1':
-    e1 ~> e1' →
-    cast_nec e0 e1 ~> cast_nec e0 e1'
+    J e0 e1 ~> J e0' e1
 
 where "A '~>' B" := (step A B).
 
@@ -316,22 +322,11 @@ Inductive judge (Γ: ctx): tm → tm → Type :=
 | judge_id κ:
     Γ ⊢ id κ ∈ (κ ~ κ)
 
-| judge_compose e0 e1 κ0 κ1 κ2:
-    Γ ⊢ e0 ∈ (κ1 ~ κ2) → Γ ⊢ e1 ∈ (κ0 ~ κ1) →
-    Γ ⊢ (e0 ∘ e1) ∈ (κ0 ~ κ2)
+(* Really unsure of this as faithful to cylindrical logic *)
+| judge_J e0 e1 κ0 κ1 τ:
+    Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (◇ κ0, τ) →
+    Γ ⊢ J e0 e1 ∈ (◇ κ1, substk κ0 κ1 τ)
 
-| judge_sym e κ0 κ1:
-    Γ ⊢ e ∈ (κ1 ~ κ0) →
-    Γ ⊢ sym e ∈ (κ0 ~ κ1)
-
-(* Really unsure of these as faithful to cylindrical logic *)
-| judge_cast_pos e0 e1 κ0 κ1 τ:
-      Γ ⊢ e0 ∈ (κ0 ~ κ1) → Γ ⊢ e1 ∈ (◇ κ0, τ) →
-      Γ ⊢ cast_pos e0 e1 ∈ (◇ κ1, τ)
-| judge_cast_nec e0 e1 κ0 κ1 τ:
-    Γ ⊢ e0 ∈ (κ0 ~ κ1) →
-    Γ ⊢ e1 ∈ (□ κ0, τ) →
-    Γ ⊢ cast_nec e0 e1 ∈ (□ κ1, τ)
 where "Γ ⊢ e ∈ τ" := (judge Γ e τ).
 
 Record ofty (τ: tm) := {
@@ -344,16 +339,16 @@ Arguments proof {τ}.
 Coercion term: ofty >-> tm.
 
 
-Function lookup (Γ: ctx) (x:string) :=
+Function lookup (x:string) (Γ: ctx) :=
   match Γ with
   | (y, τ) :: Γ' =>
-    if string_dec y x then Some τ else lookup Γ' x
+    if string_dec y x then Some τ else lookup x Γ'
   | _ => None
   end.
 
 Theorem lookup_complete {Γ x τ}:
   maps Γ x τ →
-  lookup Γ x = Some τ.
+  lookup x Γ = Some τ.
 Proof.
   intro p.
   induction p.
@@ -369,11 +364,11 @@ Proof.
 Qed.
 
 Theorem lookup_sound {Γ x τ}:
-  lookup Γ x = Some τ →
+  lookup x Γ = Some τ →
   maps Γ x τ.
 Proof.
   intro p.
-  functional induction (lookup Γ x).
+  functional induction (lookup x Γ).
   all: inversion p.
   all: subst.
   all: constructor.
@@ -447,7 +442,7 @@ Function infer (Γ: ctx) (e: tm): option tm :=
     else
       None
 
-  | var x => lookup Γ x
+  | var x => lookup x Γ
 
   | lam x τ0 e =>
     if infer Γ τ0 is Some set
@@ -519,51 +514,14 @@ Function infer (Γ: ctx) (e: tm): option tm :=
       None
 
   | id κ => Some (κ ~ κ)
-  | e0 ∘ e1 =>
-    if infer Γ e0 is Some (κ1 ~ κ2)
-    then
-      if infer Γ e1 is Some (κ0 ~ κ1')
-      then
-        if string_dec κ1 κ1'
-        then
-          Some (κ0 ~ κ2)
-        else
-          None
-      else
-        None
-    else
-      None
-
-  | sym e =>
-    if infer Γ e is Some (κ0 ~ κ1)
-    then
-      Some (κ1 ~ κ0)
-    else
-      None
-
-  | cast_pos e0 e1 =>
+  | J e0 e1 =>
     if infer Γ e0 is Some (κ0 ~ κ1)
     then
       if infer Γ e1 is Some (◇ κ0', τ)
       then
         if string_dec κ0 κ0'
         then
-          Some (◇ κ1, τ)
-        else
-          None
-      else
-        None
-    else
-      None
-
-  | cast_nec e0 e1 =>
-    if infer Γ e0 is Some (κ0 ~ κ1)
-    then
-      if infer Γ e1 is Some (□ κ0', τ)
-      then
-        if string_dec κ0 κ0'
-        then
-          Some (□ κ1, τ)
+          Some (◇ κ1, substk κ0 κ1 τ)
         else
           None
       else
@@ -595,12 +553,6 @@ Theorem infer_complete {Γ e τ}:
     2: contradiction.
     reflexivity.
   - destruct (string_dec κ κ).
-    2: contradiction.
-    reflexivity.
-  - destruct (string_dec κ1 κ1).
-    2: contradiction.
-    reflexivity.
-  - destruct (string_dec κ0 κ0).
     2: contradiction.
     reflexivity.
   - destruct (string_dec κ0 κ0).
@@ -635,7 +587,7 @@ Defined.
 
 Example tt_typed: ofty unit := typed tt.
 Example id_typed: ofty (exp unit unit) := typed (lam "x" unit (var "x")).
-Example compose_typed: ofty _ := typed (id "κ" ∘ id "κ").
+Example compose_typed: ofty _ := typed (J (id "κ") (box "κ" (id "κ"))).
 Example id_tt: ofty _ := typed (app (lam "x" unit (var "x")) tt).
 
 Definition includes (Γ Δ: ctx): Prop :=
@@ -737,10 +689,7 @@ Variant cd: tm → Type :=
 | cd_ext κ e: cd (ext κ e)
 | cd_dup e: cd (dup e)
 | cd_bind e0 x e1: cd (bind e0 x e1)
-| cd_compose e0 e1: cd (e0 ∘ e1)
-| cd_sym e: cd (sym e)
-| cd_cast_pos e0 e1: cd (cast_pos e0 e1)
-| cd_cast_nec e0 e1: cd (cast_nec e0 e1)
+| cd_J e0 e1: cd (J e0 e1)
 .
 
 Lemma canonical {v: tm} {τ}:
@@ -775,7 +724,6 @@ Proof.
     reflexivity.
 Defined.
 
-
 Lemma to_cd {e e': tm}: e ~> e' → cd e.
 Proof.
   intro s.
@@ -795,16 +743,18 @@ Function eval (e: tm): option tm :=
   | ext κ0 (necessity κ1 e) => if string_dec κ0 κ1 then Some e else None
   | dup (necessity κ e) => Some (necessity κ (necessity κ e))
 
-  | sym (id κ) => Some (id κ)
-  | id κ0 ∘ id κ1 => if string_dec κ0 κ1 then Some (id κ0) else None
-
-  | cast_pos (id κ0) (box κ1 e) => if string_dec κ0 κ1 then Some (box κ0 e) else None
-  | cast_nec (id κ0) (necessity κ1 e) => if string_dec κ0 κ1 then Some (necessity κ0 e) else None
+  | J (id κ) e => Some e
 
   | app e0 e1 =>
     if eval e0 is Some e0'
     then
       Some (app e0' e1)
+    else
+      None
+  | bind e0 x e1 =>
+    if eval e0 is Some e0'
+    then
+      Some (bind e0' x e1)
     else
       None
 
@@ -819,29 +769,12 @@ Function eval (e: tm): option tm :=
   | dup e =>
     if eval e is Some e' then Some (dup e') else None
 
-  | e0 ∘ e1 =>
+  | J e0 e1 =>
     if eval e0 is Some e0'
-    then Some (e0' ∘ e1)
+    then
+      Some (J e0' e1)
     else
-      if eval e1 is Some e1'
-      then Some (e0 ∘ e1')
-      else None
-
-  | cast_pos e0 e1 =>
-    if eval e0 is Some e0'
-    then Some (cast_pos e0' e1)
-    else
-      if eval e1 is Some e1'
-      then Some (cast_pos e0 e1')
-      else None
-
-  | cast_nec e0 e1 =>
-    if eval e0 is Some e0'
-    then Some (cast_nec e0' e1)
-    else
-      if eval e1 is Some e1'
-      then Some (cast_nec e0 e1')
-      else None
+      None
 
   | _ => None
   end.
@@ -856,6 +789,44 @@ Proof.
   all: subst.
   all: econstructor.
   all: eauto.
+Defined.
+
+Theorem eval_complete {e e'}:
+  e ~> e' → eval e = Some e'.
+Proof.
+  generalize dependent e'.
+  induction e.
+  all: intros e' p.
+  all: inversion p.
+  all: cbn.
+  all: subst.
+  all: try reflexivity.
+  - rewrite (IHe1 _ H2).
+    inversion H2.
+    all: cbn.
+    all: subst.
+    all: reflexivity.
+  - rewrite (IHe _ H0).
+    inversion H0.
+    all: reflexivity.
+  - rewrite (IHe _ H0).
+    inversion H0.
+    all: reflexivity.
+  - destruct (string_dec κ κ).
+    2: contradiction.
+    reflexivity.
+  - rewrite (IHe _ H2).
+    inversion H2.
+    all: reflexivity.
+  - rewrite (IHe _ H0).
+    inversion H0.
+    all: reflexivity.
+  - rewrite (IHe1 _ H3).
+    inversion H3.
+    all: reflexivity.
+  - rewrite (IHe1 _ H2).
+    inversion H2.
+    all: reflexivity.
 Defined.
 
 Lemma eval_code {e e'}:
@@ -963,77 +934,24 @@ Proof.
     subst.
     destruct (canonical p1 w).
     subst.
-    exists (id κ2).
+    exists (box κ1 head0).
     constructor.
   - right.
-    destruct s as [e' T].
-    exists (e0 ∘ e').
-    constructor.
-    auto.
-  - right.
-    destruct s as [e' T].
-    exists (e' ∘ e1).
-    constructor.
-    auto.
-  - right.
-    destruct s as [e' T].
-    exists (e' ∘ e1).
-    constructor.
-    auto.
-  - right.
-    destruct (canonical p w).
-    subst.
-    exists (id κ0).
-    constructor.
-  - right.
-    destruct s as [e' T].
-    exists (sym e').
-    constructor.
-    auto.
-  - right.
+    exists e1.
     destruct (canonical p1 w).
     subst.
-    destruct (canonical p2 w0) as [e' T].
-    subst.
-    exists (box κ1 e').
     constructor.
   - right.
     destruct s as [e' T].
-    exists (cast_pos e0 e').
+    exists (J e' e1).
     constructor.
     auto.
   - right.
     destruct s as [e' T].
-    exists (cast_pos e' e1).
+    exists (J e' e1).
     constructor.
     auto.
-  - right.
-    destruct s as [e' T].
-    exists (cast_pos e' e1).
-    constructor.
-    auto.
-  - right.
-    destruct (canonical p1 w).
-    destruct (canonical p2 w0) as [e' T].
-    subst.
-    exists (necessity κ1 e').
-    constructor.
-  - right.
-    destruct s as [e' T].
-    exists (cast_nec e0 e').
-    constructor.
-    auto.
-  - right.
-    destruct s as [e' T].
-    exists (cast_nec e' e1).
-    constructor.
-    auto.
-  - right.
-    destruct s as [e' T].
-    exists (cast_nec e' e1).
-    constructor.
-    auto.
-Defined.
+  Defined.
 
 Theorem subst_type {Γ x} {e0 e1: tm} {τ0 τ1}:
   (x, τ1) :: Γ ⊢ e0 ∈ τ0 →
