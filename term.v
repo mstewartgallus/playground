@@ -784,7 +784,7 @@ Proof.
 Defined.
 
 
-Fixpoint eval (e: tm): option tm :=
+Function eval (e: tm): option tm :=
   match e with
   | app (lam x _ e0) e1 => Some ([x := e1] e0)
   | bind (box _ e0) x e1 => Some ([x := e0] e1)
@@ -792,33 +792,32 @@ Fixpoint eval (e: tm): option tm :=
   | π1 (fanout e0 _) => Some e0
   | π2 (fanout _ e1) => Some e1
 
-  | ext _ (necessity _ e) => Some e
+  | ext κ0 (necessity κ1 e) => if string_dec κ0 κ1 then Some e else None
   | dup (necessity κ e) => Some (necessity κ (necessity κ e))
 
   | sym (id κ) => Some (id κ)
-  | id κ ∘ id _ => Some (id κ)
+  | id κ0 ∘ id κ1 => if string_dec κ0 κ1 then Some (id κ0) else None
 
-  | cast_pos (id κ) (box _ e) => Some (box κ e)
-  | cast_nec (id κ) (necessity _ e) => Some (necessity κ e)
+  | cast_pos (id κ0) (box κ1 e) => if string_dec κ0 κ1 then Some (box κ0 e) else None
+  | cast_nec (id κ0) (necessity κ1 e) => if string_dec κ0 κ1 then Some (necessity κ0 e) else None
 
   | app e0 e1 =>
-    eval e0 >>= λ e0',
-    Some (app e0' e1)
+    if eval e0 is Some e0'
+    then
+      Some (app e0' e1)
+    else
+      None
 
   | π1 e =>
-    eval e >>= λ e',
-    Some (π1 e')
+    if eval e is Some e' then Some (π1 e') else None
   | π2 e =>
-    eval e >>= λ e',
-    Some (π2 e')
+    if eval e is Some e' then Some (π2 e') else None
 
   | ext κ e =>
-    eval e >>= λ e',
-    Some (ext κ e')
+    if eval e is Some e' then Some (ext κ e') else None
 
   | dup e =>
-    eval e >>= λ e',
-    Some (dup e')
+    if eval e is Some e' then Some (dup e') else None
 
   | e0 ∘ e1 =>
     if eval e0 is Some e0'
@@ -846,6 +845,18 @@ Fixpoint eval (e: tm): option tm :=
 
   | _ => None
   end.
+
+Theorem eval_sound {e e'}:
+  eval e = Some e' → e ~> e'.
+Proof.
+  generalize dependent e'.
+  functional induction (eval e).
+  all: intros ? p.
+  all: inversion p.
+  all: subst.
+  all: econstructor.
+  all: eauto.
+Defined.
 
 Lemma eval_code {e e'}:
   eval e = Some e' → cd e.
