@@ -51,6 +51,9 @@ Reserved Notation "f ∘ g" (at level 30).
 Inductive tm: Type :=
 | var (x: string)
 
+(* ugly but I don't want to deal with the difference rn *)
+| kvar (κ: string)
+
 | set
 | type
 
@@ -95,6 +98,8 @@ Notation "'◇' κ , A" := (pos κ A) (at level 200).
 Notation "□ κ , A" := (nec κ A) (at level 200).
 Infix "~" := eq (at level 90).
 
+Coercion kvar: string >-> tm.
+
 Definition tm_eq (x y: tm): {x = y} + {x ≠ y}.
 Proof.
   set (s := string_dec).
@@ -106,6 +111,8 @@ Reserved Notation "'[' x ':=' s ']' t" (at level 20).
 Function subst x s (ev: tm): tm :=
   match ev with
   | var y => if string_dec x y then s else ev
+
+  | kvar _ => ev
 
   | lam y τ e =>
     if string_dec x y
@@ -159,6 +166,8 @@ Function substk (x: string) (s: string) (ev: tm): tm :=
   match ev with
   | var _ => ev
 
+  | kvar y => pick x s y
+
   | lam y τ e => lam y (substk x s τ) (substk x s e)
   | bind e0 y e1 => bind (substk x s e0) y (substk x s e1)
 
@@ -191,8 +200,6 @@ Function substk (x: string) (s: string) (ev: tm): tm :=
   | (□ κ, e) => □ (pick x s κ), (substk x s e)
   | (κ ~ μ) => pick x s κ ~ pick x s μ
   end.
-
-Notation "'[' x ':=' s ']' t" := (subst x s t) .
 
 
 Reserved Notation "t '~>' t'" (at level 40).
@@ -260,6 +267,9 @@ Inductive judge (Γ: ctx): tm → tm → Type :=
 | judge_var x τ:
     maps Γ x τ →
     Γ ⊢ var x ∈ τ
+
+| judge_kvar x:
+    Γ ⊢ kvar x ∈ set
 
 | judge_set:
     Γ ⊢ set ∈ type
@@ -338,7 +348,6 @@ Arguments term {τ}.
 Arguments proof {τ}.
 Coercion term: ofty >-> tm.
 
-
 Function lookup (x:string) (Γ: ctx) :=
   match Γ with
   | (y, τ) :: Γ' =>
@@ -378,6 +387,8 @@ Defined.
 Function infer (Γ: ctx) (e: tm): option tm :=
   match e with
   | type => None
+
+  | kvar _ => Some set
 
   | set => Some type
 
@@ -590,148 +601,6 @@ Example id_typed: ofty (exp unit unit) := typed (lam "x" unit (var "x")).
 Example compose_typed: ofty _ := typed (J (id "κ") (box "κ" (id "κ"))).
 Example id_tt: ofty _ := typed (app (lam "x" unit (var "x")) tt).
 
-Definition includes (Γ Δ: ctx): Prop :=
-  ∀ x τ, maps Δ x τ → maps Γ x τ.
-
-Notation "Γ ⊑ Δ" := (includes Γ Δ) (at level 90).
-
-Instance include_refl: Reflexive includes.
-Proof.
-  intros ? ? ? ?.
-  assumption.
-Qed.
-
-Instance include_trans: Transitive includes.
-Proof.
-  intros ? ? ? p q ? ? ?.
-  unfold includes in *.
-  apply p.
-  apply q.
-  auto.
-Qed.
-
-Theorem weakest {Γ: ctx}: Γ ⊑ nil.
-Proof.
-  intros ? ? p.
-  inversion p.
-Qed.
-
-Close Scope string_scope.
-
-Theorem weaken_judge {Γ Δ} {e: tm} {τ}:
-    Γ ⊑ Δ →
-    Δ ⊢ e ∈ τ → Γ ⊢ e ∈ τ.
-Proof.
-  intros p ty.
-  generalize dependent Γ.
-  induction ty.
-  all: intros.
-  all: econstructor.
-  all: eauto.
-  - apply IHty2.
-    intros ? ? ?.
-    apply lookup_sound.
-    destruct (string_dec x x0) eqn:q.
-    all: subst.
-    + set (p' := lookup_complete H).
-      cbn in *.
-      rewrite q in *.
-      assumption.
-    + set (p' := lookup_complete H).
-      cbn in *.
-      rewrite q in *.
-      apply lookup_complete.
-      apply p.
-      apply lookup_sound.
-      assumption.
-  - apply IHty2.
-    intros ? ? ?.
-    apply lookup_sound.
-    cbn.
-    destruct (string_dec x x0) eqn:q.
-    all: subst.
-    + set (p' := lookup_complete H).
-      cbn in *.
-      rewrite q in p'.
-      assumption.
-    + set (p' := lookup_complete H).
-      cbn in *.
-      rewrite q in p'.
-      apply lookup_complete.
-      apply p.
-      apply lookup_sound.
-      assumption.
-Defined.
-
-Variant whnf: tm → Type :=
-| whnf_set: whnf set
-| whnf_type: whnf type
-
-| whnf_unit: whnf unit
-| whnf_prod A B: whnf (prod A B)
-| whnf_exp A B: whnf (exp A B)
-| whnf_pos κ A: whnf (◇ κ, A)
-| whnf_nec κ A: whnf (□ κ, A)
-| whnf_eq κ μ: whnf (κ ~ μ)
-
-| whnf_tt: whnf tt
-| whnf_fanout e0 e1: whnf (fanout e0 e1)
-| whnf_lam x τ e: whnf (lam x τ e)
-| whnf_box κ e: whnf (box κ e)
-| whnf_necessity κ e: whnf (necessity κ e)
-| whnf_id κ: whnf (id κ)
-.
-
-Variant cd: tm → Type :=
-| cd_app e0 e1: cd (app e0 e1)
-| cd_π1 e: cd (π1 e)
-| cd_π2 e: cd (π2 e)
-| cd_ext κ e: cd (ext κ e)
-| cd_dup e: cd (dup e)
-| cd_bind e0 x e1: cd (bind e0 x e1)
-| cd_J e0 e1: cd (J e0 e1)
-.
-
-Lemma canonical {v: tm} {τ}:
-  nil ⊢ v ∈ τ → whnf v →
-  match τ with
-  | unit => (v = tt: Type)
-  | prod _ _ => Σ e0 e1, v = fanout e0 e1
-  | exp τ0 _ => Σ x e0, v = lam x τ0 e0
-  | pos κ _ => Σ e, v = box κ e
-  | nec κ _ => Σ e, v = necessity κ e
-  | eq κ0 κ1 => (κ0 = κ1) ∧ v = id κ0
-  | type => v = set
-  | set => True (* Feels wrong *)
-  | _ => (False: Type)
-  end.
-Proof.
-  intros p w.
-  destruct τ.
-  all: destruct w.
-  all: inversion p.
-  all: subst.
-  all: eauto.
-  - exists e0.
-    exists e1.
-    reflexivity.
-  - exists x.
-    exists e.
-    reflexivity.
-  - exists e.
-    reflexivity.
-  - exists e.
-    reflexivity.
-Defined.
-
-Lemma to_cd {e e': tm}: e ~> e' → cd e.
-Proof.
-  intro s.
-  induction s.
-  all: constructor.
-Defined.
-
-
 Function eval (e: tm): option tm :=
   match e with
   | app (lam x _ e0) e1 => Some ([x := e1] e0)
@@ -828,6 +697,150 @@ Proof.
     inversion H2.
     all: reflexivity.
 Defined.
+
+Definition includes (Γ Δ: ctx): Prop :=
+  ∀ x τ, maps Δ x τ → maps Γ x τ.
+
+Notation "Γ ⊑ Δ" := (includes Γ Δ) (at level 90).
+
+Instance include_refl: Reflexive includes.
+Proof.
+  intros ? ? ? ?.
+  assumption.
+Qed.
+
+Instance include_trans: Transitive includes.
+Proof.
+  intros ? ? ? p q ? ? ?.
+  unfold includes in *.
+  apply p.
+  apply q.
+  auto.
+Qed.
+
+Theorem weakest {Γ: ctx}: Γ ⊑ nil.
+Proof.
+  intros ? ? p.
+  inversion p.
+Qed.
+
+Close Scope string_scope.
+
+Theorem weaken_judge {Γ Δ} {e: tm} {τ}:
+    Γ ⊑ Δ →
+    Δ ⊢ e ∈ τ → Γ ⊢ e ∈ τ.
+Proof.
+  intros p ty.
+  generalize dependent Γ.
+  induction ty.
+  all: intros.
+  all: econstructor.
+  all: eauto.
+  - apply IHty2.
+    intros ? ? ?.
+    apply lookup_sound.
+    destruct (string_dec x x0) eqn:q.
+    all: subst.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in *.
+      assumption.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in *.
+      apply lookup_complete.
+      apply p.
+      apply lookup_sound.
+      assumption.
+  - apply IHty2.
+    intros ? ? ?.
+    apply lookup_sound.
+    cbn.
+    destruct (string_dec x x0) eqn:q.
+    all: subst.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in p'.
+      assumption.
+    + set (p' := lookup_complete H).
+      cbn in *.
+      rewrite q in p'.
+      apply lookup_complete.
+      apply p.
+      apply lookup_sound.
+      assumption.
+Defined.
+
+Variant whnf: tm → Type :=
+| whnf_set: whnf set
+| whnf_type: whnf type
+
+| whnf_kvar x: whnf (kvar x)
+
+| whnf_unit: whnf unit
+| whnf_prod A B: whnf (prod A B)
+| whnf_exp A B: whnf (exp A B)
+| whnf_pos κ A: whnf (◇ κ, A)
+| whnf_nec κ A: whnf (□ κ, A)
+| whnf_eq κ μ: whnf (κ ~ μ)
+
+| whnf_tt: whnf tt
+| whnf_fanout e0 e1: whnf (fanout e0 e1)
+| whnf_lam x τ e: whnf (lam x τ e)
+| whnf_box κ e: whnf (box κ e)
+| whnf_necessity κ e: whnf (necessity κ e)
+| whnf_id κ: whnf (id κ)
+.
+
+Variant cd: tm → Type :=
+| cd_app e0 e1: cd (app e0 e1)
+| cd_π1 e: cd (π1 e)
+| cd_π2 e: cd (π2 e)
+| cd_ext κ e: cd (ext κ e)
+| cd_dup e: cd (dup e)
+| cd_bind e0 x e1: cd (bind e0 x e1)
+| cd_J e0 e1: cd (J e0 e1)
+.
+
+Lemma canonical {v: tm} {τ}:
+  nil ⊢ v ∈ τ → whnf v →
+  match τ with
+  | unit => (v = tt: Type)
+  | prod _ _ => Σ e0 e1, v = fanout e0 e1
+  | exp τ0 _ => Σ x e0, v = lam x τ0 e0
+  | pos κ _ => Σ e, v = box κ e
+  | nec κ _ => Σ e, v = necessity κ e
+  | eq κ0 κ1 => (κ0 = κ1) ∧ v = id κ0
+  | type => v = set
+  | set => True (* Feels wrong *)
+  | _ => (False: Type)
+  end.
+Proof.
+  intros p w.
+  destruct τ.
+  all: destruct w.
+  all: inversion p.
+  all: subst.
+  all: eauto.
+  - exists e0.
+    exists e1.
+    reflexivity.
+  - exists x.
+    exists e.
+    reflexivity.
+  - exists e.
+    reflexivity.
+  - exists e.
+    reflexivity.
+Defined.
+
+Lemma to_cd {e e': tm}: e ~> e' → cd e.
+Proof.
+  intro s.
+  induction s.
+  all: constructor.
+Defined.
+
 
 Lemma eval_code {e e'}:
   eval e = Some e' → cd e.

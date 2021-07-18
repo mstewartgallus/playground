@@ -6,6 +6,7 @@ Require Import Coq.Setoids.Setoid.
 Require Import Coq.Classes.SetoidClass.
 Require Import FunInd.
 Require Import Recdef.
+Require Coq.Arith.PeanoNat.
 
 Import IfNotations.
 Import ListNotations.
@@ -25,8 +26,7 @@ Definition option_then {A B} (x: option A) (y: option B): option B :=
 Infix ">>" := option_then (at level 30, right associativity).
 
 Inductive tm: Type :=
-| set
-| type
+| type (n: nat)
 
 | prod (A B: tm)
 | pos (κ: string) (A: tm)
@@ -47,6 +47,7 @@ Arguments tm: clear implicits.
 
 Definition tm_eq (x y: tm): {x = y} + {x ≠ y}.
 Proof.
+  set (t := PeanoNat.Nat.eq_dec).
   set (s := string_dec).
   decide equality.
 Defined.
@@ -54,9 +55,12 @@ Defined.
 Infix "×" := prod (at level 50).
 
 Notation "'◇' κ , A" := (pos κ A) (at level 200).
-(* (* Like forall but I use box because ∀ is already taken *) *)
-(* Notation "□ κ , A" := (nec κ A) (at level 200). *)
 Infix "~" := eq (at level 90).
+
+Definition var (κ: string) := κ ~ κ.
+Coercion var: string >-> tm.
+
+Notation "'set'" := (type 0).
 
 Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z).
 
@@ -84,7 +88,7 @@ Function subst (x: string) (s: string) (ev: tm): tm :=
     (if string_dec x κ then s else κ) ~ (if string_dec x μ then s else x)
 
   | set => set
-  | type => type
+  | type N => type N
   end.
 
 
@@ -119,8 +123,8 @@ Instance tm_Setoid: Setoid tm := {
 }.
 
 Inductive judge: tm → tm → Type :=
-| judge_set:
-    set ∈ type
+| judge_type n:
+    type n ∈ type (S n)
 
 | judge_prod {A B}:
     A ∈ set → B ∈ set →
@@ -194,9 +198,7 @@ Function step (ev: tm): tm :=
 
 Function infer (e: tm): option tm :=
   match e with
-  | type => None
-
-  | set => Some type
+  | type n => Some (type (S n))
 
   | prod A B =>
     if infer A is Some set
@@ -338,4 +340,4 @@ Defined.
 
 Example tt_typed: ofty _ :=
   typed
-    (J (id "x") (box "x" (◇ "x", "x" ~ "x"))).
+    (J (id "x") (box "x" (◇ "x", "x"))).
