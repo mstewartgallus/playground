@@ -1,91 +1,281 @@
 Require Import Coq.Unicode.Utf8.
 Require Import Coq.Setoids.Setoid.
 Require Import Coq.Classes.SetoidClass.
+Require Import Coq.Strings.String.
+Require Import Coq.Logic.FunctionalExtensionality.
 
-Declare Scope category_scope.
-Declare Scope functor_scope.
-Declare Scope morphism_scope.
+Reserved Notation "⟨ x , y , .. , z ⟩".
 
-Delimit Scope category_scope with category.
-Delimit Scope functor_scope with functor.
-Delimit Scope morphism_scope with morphism.
+Reserved Notation "'some' x .. y , P"
+         (at level 200, x binder, y binder, right associativity,
+          format "'[ ' '[ ' 'some'  x .. y ']' ,  '/' P ']'").
+Reserved Notation "'Σ' x .. y , P"
+         (at level 200, x binder, y binder, right associativity,
+          format "'[ ' '[ ' 'Σ'  x .. y ']' ,  '/' P ']'").
 
-Inductive category {X} :=
-| η (x: X)
-| set
-| trv
-| prod (A B: category)
+Record someT [A] (P: A → Type) := some_intro { head: A ; tail: P head ; }.
+
+Arguments some_intro [A P].
+Arguments head [A P].
+Arguments tail [A P].
+
+Module Import SomeNotations.
+  Add Printing Let someT.
+
+  Notation "'some' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
+  Notation "'Σ' x .. y , P" := (someT (λ x, .. (someT (λ y,  P)) .. )) : type_scope.
+  Notation "⟨ x , y , .. , z ⟩" := (some_intro .. (some_intro x y) .. z) : core_scope.
+End SomeNotations.
+
+Record iso A B := {
+  to: A → B ;
+  from: B → A ;
+  to_from x: to (from x) = x ;
+  from_to x: from (to x) = x ;
+}.
+
+Arguments to {A B}.
+Arguments from {A B}.
+
+Inductive sort :=
+| empty | unit
+| sum (A B: sort)
+| prod (A B: sort)
+| exp (A B: sort)
+| Forall (κ: string) (A: sort)
+| Forsome (κ: string) (A: sort)
+| diag (κ μ: string)
 .
 
-Arguments category: clear implicits.
-Bind Scope category_scope with category.
+Inductive term: sort → sort → Type :=
+| id A: term A A
+| compose {A B C}: term B C → term A B → term A C
 
-Notation "⊤" := trv.
-Infix "*" := prod.
+| bang {A}: term A unit
+| fanout {A B C}: term C A → term C B → term C (prod A B)
+| π1 {A B}: term (prod A B) A
+| π2 {A B}: term (prod A B) B
 
-Reserved Notation "A ⊩ B" (at level 80).
+| absurd {A}: term empty A
+| fanin {A B C}: term A C → term B C → term (sum A B) C
+| i1 {A B}: term A (sum A B)
+| i2 {A B}: term B (sum A B)
 
-Inductive functor {X}: category X → category X → Type :=
-| Id A: A ⊩ A
-| Compose {A B C}:
-    B ⊩ C → A ⊩ B → A ⊩ C
+| curry {A B C}: term (prod A B) C → term B (exp A C)
+| ev {A B}: term (prod A (exp A B)) B
 
-| Bang A: A ⊩ ⊤
-| Fanout {A B C}:
-    C ⊩ A → (C ⊩ B) →
-    C ⊩ (A * B)
-| Fst A B: (A * B) ⊩ A
-| Snd A B: (A * B) ⊩ B
+| map_Forsome {A B κ}: term A B → term (Forsome κ A) (Forsome κ B)
+| pure {A κ}: term A (Forsome κ A)
+| join {A κ}: term (Forsome κ (Forsome κ A)) (Forsome κ A)
+| swap_Forsome {A κ μ}: κ ≠ μ → term (Forsome κ (Forsome μ A)) (Forsome μ (Forsome κ A))
 
-| Unit: ⊤ ⊩ set
-| Empty: ⊤ ⊩ set
-| Prod: (set * set) ⊩ set
-| Sum: (set * set) ⊩ set
-where "A ⊩ B" := (functor A B)
+| necessity {A κ}: term unit A → term unit (Forall κ A)
+| map_Forall {A B κ}: term A B → term (Forall κ A) (Forall κ B)
+| mon {A B κ}: term (prod (Forall κ A) (Forall κ B)) (Forall κ (prod A B))
+| extract {A κ}: term (Forall κ A) A
+| dup {A κ}: term (Forall κ A) (Forall κ (Forall κ A))
+| swap_Forall {A κ μ}:
+    κ ≠ μ → term (Forall κ (Forall μ A)) (Forall μ (Forall κ A))
+
+| refl κ: term unit (diag κ κ)
+| sym {i j}: term (diag i j) (diag j i)
+| trans {i j k}: term (prod (diag i j) (diag j k)) (diag i k)
 .
 
-Bind Scope functor_scope with functor.
+Infix "∘" := compose (at level 30).
 
-Infix "∘" := Compose (at level 30) : functor_scope.
+Definition put (Γ: string → Type) (κ: string) (v: Type) (μ: string): Type :=
+  if string_dec κ μ
+  then
+    v
+  else
+    Γ μ.
 
-Notation "!" := Bang : functor_scope.
-Notation "⟨ x , y , .. , z ⟩" := (Fanout .. (Fanout x y) .. z) : functor_scope.
+Lemma put_redundant {κ Γ}: put Γ κ (Γ κ) = Γ.
+Proof.
+  extensionality x.
+  unfold put.
+  destruct (string_dec κ x).
+  all: subst.
+  all: reflexivity.
+Qed.
 
-Notation "⊤" := Unit : functor_scope.
-Notation "⊥" := Empty : functor_scope.
+Lemma put_put {κ Γ x y}: put (put Γ κ x) κ y = put Γ κ y.
+Proof.
+  extensionality μ.
+  unfold put.
+  destruct (string_dec κ μ).
+  all: subst.
+  all: reflexivity.
+Qed.
 
-Reserved Notation "A ⊢ B" (at level 80).
+Lemma put_swap {κ μ Γ x y}:
+  κ ≠ μ → put (put Γ κ x) μ y = put (put Γ μ y) κ x.
+Proof.
+  intro p.
+  extensionality ν.
+  unfold put.
+  destruct (string_dec μ ν) eqn:q, (string_dec κ ν) eqn:r.
+  all: subst.
+  all: try reflexivity.
+  contradiction.
+Qed.
 
-Inductive morphism {X}: ∀ {F G: category X}, F ⊩ G → F ⊩ G → Type :=
-| id {F G} (A: F ⊩ G) : A ⊢ A
-| compose {F G} {A B C: F ⊩ G}:
-    B ⊢ C → A ⊢ B → A ⊢ C
+(*
+ Sorts are interpreted as multi-profunctors over a groupoid [xs,V] → Set ?
+ Dealing with variance is a massive pain.
+*)
 
-| bang {Γ} (A: Γ ⊩ set): A ⊢ (Unit ∘ ! _)
-| fanout {Γ} {C A B: Γ ⊩ set}:
-    C ⊢ A → C ⊢ B →
-    C ⊢ Prod ∘ ⟨A, B⟩
-| fst {Γ} {A B: Γ ⊩ set}:
-    Prod ∘ ⟨A, B⟩ ⊢ A
-| snd {Γ} {A B: Γ ⊩ set}:
-    Prod ∘ ⟨A, B⟩ ⊢ B
+Fixpoint op (S: sort) (Γ: string → Type): Type :=
+  match S with
+  | empty => False
+  | unit => True
+  | sum A B => op A Γ + op B Γ
+  | prod A B => op A Γ * op B Γ
 
-| absurd {Γ} (A: Γ ⊩ set): (Empty ∘ ! _) ⊢ A
-| fanin {Γ} {A B C: Γ ⊩ set}:
-    A ⊢ C → B ⊢ C →
-    Sum ∘ ⟨A,  B⟩ ⊢ C
-| inl {Γ} {A B: Γ ⊩ set}: A ⊢ Sum ∘ ⟨A, B⟩
-| inr {Γ} {A B: Γ ⊩ set}: B ⊢ Sum ∘ ⟨A, B⟩
-where "A ⊢ B" := (morphism A B)
-.
+  (* Not appropriately variant in Γ ?
+    I think I would need something like
+    op A Δ Γ → op B Γ Δ
+   to handle variance
+  *)
+  | exp A B => op A Γ → op B Γ
 
-Bind Scope morphism_scope with morphism.
+  (* Still really confused about this part.  I think other sources
+     might complicate it because they have to do a relation variant of
+     put?  *)
+  | Forall κ A => ∀ v, op A (put Γ κ v)
+  | Forsome κ A => Σ v, op A (put Γ κ v)
+  | diag κ μ => iso (Γ κ) (Γ μ)
+  end.
 
-Infix "∘" := compose : morphism_scope.
-Notation "!" := bang : morphism_scope.
+Definition eval {A B} (t: term A B) {κ}: op A κ → op B κ.
+Proof.
+  generalize dependent κ.
+  induction t.
+  all: intros Γ x.
+  - apply x.
+  - apply IHt1.
+    apply IHt2.
+    auto.
+  - cbn in *.
+    exists.
+  - cbn in *.
+    split.
+    + apply IHt1.
+      auto.
+    + apply IHt2.
+      auto.
+  - apply x.
+  - apply x.
+  - cbn in x.
+    contradiction.
+  - cbn in *.
+    destruct x as [x' | x'].
+    + apply IHt1.
+      auto.
+    + apply IHt2.
+      auto.
+  - cbn in *.
+    left.
+    auto.
+  - cbn in *.
+    right.
+    auto.
+  - cbn in *.
+    intro y.
+    apply (IHt Γ).
+    apply (y, x).
+  - destruct x as [x f].
+    apply (f x).
+  - cbn in *.
+    exists (head x).
+    apply IHt.
+    apply (tail x).
+  - cbn in *.
+    exists (Γ κ).
+    rewrite put_redundant.
+    auto.
+  - destruct x as [h [h' t]].
+    cbn in *.
+    exists h'.
+    rewrite put_put in t.
+    auto.
+  - destruct x as [h [h' t]].
+    cbn in *.
+    exists h'.
+    exists h.
+    auto.
+    rewrite put_swap.
+    1: auto.
+    auto.
+  - cbn in *.
+    intro v.
+    apply IHt.
+    apply x.
+  - cbn in *.
+    intro v.
+    apply IHt.
+    apply x.
+  - cbn in *.
+    destruct x as [x y].
+    intro v.
+    apply (x v, y v).
+  - cbn in x.
+    set (x' := x (Γ κ)).
+    rewrite put_redundant in x'.
+    auto.
+  - cbn in *.
+    intros.
+    rewrite put_put.
+    apply x.
+  - cbn in *.
+    intros.
+    rewrite put_swap.
+    2:auto.
+    apply x.
+  - cbn.
+    refine {| to x := x ; from x := x |}.
+    all: intros; reflexivity.
+  - cbn in *.
+    refine {| to := from x ; from := to x |}.
+    + intros.
+      rewrite from_to.
+      reflexivity.
+    + intros.
+      rewrite to_from.
+      reflexivity.
+  - cbn in *.
+    destruct x as [p q].
+    refine {| to x := to q (to p x) ; from x := from p (from q x) |}.
+    + intros.
+      rewrite to_from.
+      rewrite to_from.
+      reflexivity.
+    + intros.
+      rewrite from_to.
+      rewrite from_to.
+      reflexivity.
+Defined.
 
-Notation "⟨ x , y , .. , z ⟩" := (fanout .. (fanout x y) .. z) : morphism_scope.
-Notation "[ x ; y ; .. ; z ]" := (fanin .. (fanin x y) .. z) : morphism_scope.
-
-Example diag {X} {Γ: category X} (A: Γ ⊩ set): A ⊢ Prod ∘ ⟨A, A⟩ :=
-  ⟨ id _,  id _ ⟩.
+(* Not even so important ? *)
+Definition map (S: sort) {Γ Δ: string → Type} (f: ∀ κ, iso (Δ κ) (Γ κ)): op S Γ → op S Δ.
+Proof.
+  generalize dependent Δ.
+  generalize dependent Γ.
+  induction S.
+  all: intros Γ Δ f x.
+  - cbn in *.
+    contradiction.
+  - cbn in *.
+    exists.
+  - cbn in *.
+    destruct x as [x'|x'].
+    + left.
+      apply (IHS1 Γ Δ f x').
+    + right.
+      apply (IHS2 Γ Δ f x').
+  - cbn in *.
+    apply (IHS1 Γ Δ f (fst x), IHS2 Γ Δ f (snd x)).
+  - cbn in *.
+    intro y.
+Admitted.
