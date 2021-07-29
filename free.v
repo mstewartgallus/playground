@@ -45,7 +45,7 @@ Inductive sort :=
 | Forall (κ: string) (A: sort)
 | Forsome (κ: string) (A: sort)
 | diag (κ μ: string)
-(* FIXME add yoneda/basechange *)
+| basechange (p: (string → Type) → (string → Type)) (x: sort)
 .
 
 Inductive term: sort → sort → Type :=
@@ -140,6 +140,7 @@ Fixpoint op (S: sort) (Γ: string → Type): Type :=
   | Forall κ A => ∀ v, op A (put Γ κ v)
   | Forsome κ A => Σ v, op A (put Γ κ v)
   | diag κ μ => ∀ Δ, (∀ s, Δ s → Γ s) → Δ κ → Δ μ
+  | basechange p x => ∀ Δ, (∀ s, p Δ s → Γ s) → op x Δ
   end.
 
 (* Not even so important ? *)
@@ -199,6 +200,16 @@ Proof.
       apply p.
       auto.
     + auto.
+  - cbn in *.
+    intros.
+    apply (IHS Δ0).
+    + intros.
+      auto.
+    + apply x.
+      intros.
+      apply f.
+      apply X.
+      auto.
 Defined.
 
 Definition eval {A B} (t: term A B) {κ}: op A κ → op B κ.
