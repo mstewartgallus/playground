@@ -45,6 +45,7 @@ Inductive sort :=
 | Forall (κ: string) (A: sort)
 | Forsome (κ: string) (A: sort)
 | diag (κ μ: string)
+(* FIXME add yoneda/basechange *)
 .
 
 Inductive term: sort → sort → Type :=
@@ -78,7 +79,6 @@ Inductive term: sort → sort → Type :=
     κ ≠ μ → term (Forall κ (Forall μ A)) (Forall μ (Forall κ A))
 
 | refl κ: term unit (diag κ κ)
-| sym {i j}: term (diag i j) (diag j i)
 | trans {i j k}: term (prod (diag i j) (diag j k)) (diag i k)
 .
 
@@ -132,21 +132,74 @@ Fixpoint op (S: sort) (Γ: string → Type): Type :=
   | unit => True
   | sum A B => op A Γ + op B Γ
   | prod A B => op A Γ * op B Γ
-
-  (* Not appropriately variant in Γ ?
-    I think I would need something like
-    op A Δ Γ → op B Γ Δ
-   to handle variance
-  *)
-  | exp A B => op A Γ → op B Γ
+  | exp A B => ∀ Δ, (∀ s, Δ s → Γ s) → op A Δ → op B Δ
 
   (* Still really confused about this part.  I think other sources
      might complicate it because they have to do a relation variant of
      put?  *)
   | Forall κ A => ∀ v, op A (put Γ κ v)
   | Forsome κ A => Σ v, op A (put Γ κ v)
-  | diag κ μ => iso (Γ κ) (Γ μ)
+  | diag κ μ => ∀ Δ, (∀ s, Δ s → Γ s) → Δ κ → Δ μ
   end.
+
+(* Not even so important ? *)
+
+Definition map (S: sort) {Γ Δ: string → Type} (f: ∀ κ, Δ κ → Γ κ): op S Γ → op S Δ.
+Proof.
+  generalize dependent Δ.
+  generalize dependent Γ.
+  induction S.
+  all: intros Γ Δ f x.
+  - cbn in *.
+    contradiction.
+  - cbn in *.
+    exists.
+  - cbn in *.
+    destruct x as [x'|x'].
+    + left.
+      apply (IHS1 Γ Δ f x').
+    + right.
+      apply (IHS2 Γ Δ f x').
+  - cbn in *.
+    apply (IHS1 Γ Δ f (fst x), IHS2 Γ Δ f (snd x)).
+  - cbn in *.
+    intros Δ' p y.
+    apply (x Δ').
+    + intros ? ?.
+      apply f.
+      apply p.
+      auto.
+    + auto.
+  - cbn in *.
+    intros ?.
+    apply (IHS (put Γ κ v)).
+    + intros.
+      unfold put in *.
+      destruct (string_dec κ κ0).
+      * auto.
+      * apply f.
+        auto.
+    + apply x.
+  - cbn in *.
+    destruct x as [h x].
+    exists h.
+    apply (IHS (put Γ κ h)).
+    + intros.
+      unfold put in *.
+      destruct (string_dec κ κ0).
+      * auto.
+      * apply f.
+        auto.
+    + apply x.
+  - cbn in *.
+    intros ? p y.
+    apply x.
+    + intros ? z.
+      apply f.
+      apply p.
+      auto.
+    + auto.
+Defined.
 
 Definition eval {A B} (t: term A B) {κ}: op A κ → op B κ.
 Proof.
@@ -182,11 +235,15 @@ Proof.
     right.
     auto.
   - cbn in *.
-    intro y.
-    apply (IHt Γ).
-    apply (y, x).
+    intros Δ p y.
+    apply (IHt Δ).
+    refine (y, _).
+    apply (map _ p x).
   - destruct x as [x f].
-    apply (f x).
+    cbn in f.
+    refine (f _ _ x).
+    intros.
+    auto.
   - cbn in *.
     exists (head x).
     apply IHt.
@@ -234,48 +291,15 @@ Proof.
     2:auto.
     apply x.
   - cbn.
-    refine {| to x := x ; from x := x |}.
-    all: intros; reflexivity.
+    intros.
+    apply X0.
   - cbn in *.
-    refine {| to := from x ; from := to x |}.
-    + intros.
-      rewrite from_to.
-      reflexivity.
-    + intros.
-      rewrite to_from.
-      reflexivity.
-  - cbn in *.
-    destruct x as [p q].
-    refine {| to x := to q (to p x) ; from x := from p (from q x) |}.
-    + intros.
-      rewrite to_from.
-      rewrite to_from.
-      reflexivity.
-    + intros.
-      rewrite from_to.
-      rewrite from_to.
-      reflexivity.
+    destruct x as [f g].
+    intros Δ p y.
+    apply g.
+    1: apply p.
+    apply f.
+    1: apply p.
+    auto.
 Defined.
 
-(* Not even so important ? *)
-Definition map (S: sort) {Γ Δ: string → Type} (f: ∀ κ, iso (Δ κ) (Γ κ)): op S Γ → op S Δ.
-Proof.
-  generalize dependent Δ.
-  generalize dependent Γ.
-  induction S.
-  all: intros Γ Δ f x.
-  - cbn in *.
-    contradiction.
-  - cbn in *.
-    exists.
-  - cbn in *.
-    destruct x as [x'|x'].
-    + left.
-      apply (IHS1 Γ Δ f x').
-    + right.
-      apply (IHS2 Γ Δ f x').
-  - cbn in *.
-    apply (IHS1 Γ Δ f (fst x), IHS2 Γ Δ f (snd x)).
-  - cbn in *.
-    intro y.
-Admitted.
