@@ -121,7 +121,7 @@ Module Free.
   }.
 
   #[program]
-  Definition ε {A: Term}: Hom (Free A) A :=
+  Definition ε (A: Term): Hom (Free A) A :=
     fix loop e :=
       match e with
       | η T => T
@@ -166,6 +166,34 @@ Module Free.
     all: cbn.
     all: try reflexivity.
   Qed.
+
+  #[program]
+  Definition join (A: Type): Hom (Free (Free A)) (Free A) :=
+    fix loop e :=
+      match e with
+      | η T => T
+      | mt => ∅
+      | trv => ·
+      | sum A B => loop A + loop B
+      | prod A B => loop A * loop B
+      | exp A B => loop A ^ loop B
+      end.
+
+  Next Obligation.
+  Proof.
+    exists.
+    all: cbn.
+    all: try reflexivity.
+    intros ? ? p.
+    rewrite p.
+    reflexivity.
+  Qed.
+
+  #[program]
+   Definition bind {A B} (f: A → Free B): Hom (Free A) (Free B) := λ x, proj1_sig (join _) (proj1_sig (map f) x).
+  Next Obligation.
+  Proof.
+  Admitted.
 End Free.
 
 Module Pullback.
@@ -541,17 +569,19 @@ Module StructuredSlice.
 
   Definition Any S: Obj S := {| π := Hom.id _ |}.
 
-  Definition basechange {A B: Type} (f: A → B): Obj B → Obj A :=
-    basechange (Free.map f).
+  Definition basechange {A B: Type} (f: A → Free B): Obj B → Obj A :=
+    basechange (Free.bind f).
 
-  Definition Σ {A B: Type} (f: A → B): Obj A → Obj B :=
-    Σ (Free.map f).
+  Definition Σ {A B: Type} (f: A → Free B): Obj A → Obj B :=
+    Σ (Free.bind f).
 
-  Definition Π {A B: Type} (f: A → B): Obj A → Obj B :=
-    Π (Free.map f).
+  Definition Π {A B: Type} (f: A → Free B): Obj A → Obj B :=
+    Π (Free.bind f).
 
-  Definition pure {S T} {A: Obj S} (f: S → T): Struct A (basechange f (Π f A)) :=
-    pure (Free.map f).
+  Definition pure {S T} {A: Obj S} (f: S → Free T): Struct A (basechange f (Π f A)) :=
+    pure (Free.bind f).
+
+  Infix "::" := basechange.
 End StructuredSlice.
 
 Module Span.
@@ -694,7 +724,14 @@ Import StructuredSlice.
 
 Open Scope string_scope.
 
-Definition eval {A: Term}: Obj A → bundle A := Slice.Π ε.
+Definition subst x (e: Free string) y: Free string :=
+  if string_dec x y then e else η y.
+
+Infix "::=" := subst (at level 30).
+
+
+(* FIXME define generic adjunction first then specialize to substutition *)
+Definition eval {A: Term}: Obj A → bundle A := Slice.Π (ε _).
 
 #[program]
 Definition close (S: Term) {A B: Obj S} (f: Struct A B): slice (eval A) (eval B) :=
@@ -762,8 +799,8 @@ Instance Set_Term: Term := {
 
 Definition close_Term {A B} := @close Set_Term A B.
 
-Definition Forsome (x: Obj nat): Obj nat := basechange S (Π S x).
-Definition Forall (x: Obj nat): Obj nat := basechange S (Π S x).
+Definition Forsome (x: Obj nat): Obj nat := basechange (λ x, η (S x)) (Π (λ x, η (S x)) x).
+Definition Forall (x: Obj nat): Obj nat := basechange (λ x, η (S x)) (Π (λ x, η (S x)) x).
 
 (* weird *)
-Definition foo: Struct (Any nat) (Forall (Any nat)) := pure S.
+Definition foo: Struct (Any nat) (Forall (Any nat)) := pure (λ x, η (S x)).
