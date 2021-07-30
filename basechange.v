@@ -9,6 +9,9 @@ Set Universe Polymorphism.
 #[global]
 Set Default Goal Selector "!".
 
+#[global]
+Unset Universe Minimization ToSet.
+
 Require Import Coq.Unicode.Utf8.
 
 Require Import Coq.Setoids.Setoid.
@@ -16,6 +19,7 @@ Require Import Coq.Classes.SetoidClass.
 Require Import Coq.Strings.String.
 
 (* Prototype an approach based around "structured cospans" *)
+#[universes(cumulative)]
 Class Term := {
   T: Type ;
   T_Setoid: Setoid T ;
@@ -44,6 +48,7 @@ Infix "+" := sum.
 Infix "*" := prod.
 Infix "^" := exp.
 
+#[universes(cumulative)]
 Class Homomorphism {A B: Term} (f: A → B): Prop := {
   map_Proper: Proper (equiv ==> equiv) f ;
   map_mt: f ∅ == ∅ ;
@@ -93,7 +98,7 @@ End Terminal.
 
 Module Free.
   #[universes(cumulative)]
-   Inductive free {U: Type} :=
+  Inductive free {U: Type} :=
   | η (u: U)
   | mt | trv
   | sum (A B: free)
@@ -114,6 +119,28 @@ Module Free.
     prod := prod ;
     exp := exp ;
   }.
+
+  #[program]
+  Definition ε {A: Term}: Hom (Free A) A :=
+    fix loop e :=
+      match e with
+      | η T => T
+      | mt => ∅
+      | trv => ·
+      | sum A B => loop A + loop B
+      | prod A B => loop A * loop B
+      | exp A B => loop A ^ loop B
+      end.
+
+  Next Obligation.
+  Proof.
+    exists.
+    all: cbn.
+    all: try reflexivity.
+    intros ? ? p.
+    rewrite p.
+    reflexivity.
+  Qed.
 
   #[program]
   Definition map {A B} (f: A → B): Hom (Free A) (Free B) :=
@@ -274,6 +301,7 @@ End Pullback.
 
 Module Slice.
   (* Term/S *)
+  #[universes(cumulative)]
   Record bundle A := {
     s: Term ;
     π: Hom s A ;
@@ -527,11 +555,12 @@ Module StructuredSlice.
 End StructuredSlice.
 
 Module Span.
+  #[universes(cumulative)]
   Record span A B := {
     s: Term ;
     π1: Hom s A ;
     π2: Hom s B ;
-                    }.
+  }.
 
   Arguments s {A B}.
   Arguments π1 {A B}.
@@ -664,6 +693,74 @@ Import Slice.
 Import StructuredSlice.
 
 Open Scope string_scope.
+
+Definition eval {A: Term}: Obj A → bundle A := Slice.Π ε.
+
+#[program]
+Definition close (S: Term) {A B: Obj S} (f: Struct A B): slice (eval A) (eval B) :=
+  λ x, (proj1_sig f (fst (proj1_sig x)), snd (proj1_sig x)).
+
+Next Obligation.
+Proof.
+  destruct x as [[x y] xp].
+  destruct f as [f [fH fp]].
+  cbn in *.
+  rewrite <- (fp x) in xp.
+  auto.
+Qed.
+
+Next Obligation.
+Proof.
+  destruct f as [f [p q]].
+  cbn in *.
+  split.
+  - exists.
+    all: cbn.
+    + intros ? ? r.
+      destruct r as [r r'].
+      cbn.
+      rewrite r, r'.
+      split.
+      all: reflexivity.
+    + split.
+      2: reflexivity.
+      rewrite map_mt.
+      reflexivity.
+    + split.
+      2: reflexivity.
+      rewrite map_trv.
+      reflexivity.
+    + split.
+      2: reflexivity.
+      rewrite map_sum.
+      reflexivity.
+    + split.
+      2: reflexivity.
+      rewrite map_prod.
+      reflexivity.
+    + split.
+      2: reflexivity.
+      rewrite map_exp.
+      reflexivity.
+  - intros x.
+    reflexivity.
+Qed.
+
+Instance Type_Setoid: Setoid Type := {
+  equiv := eq ;
+}.
+
+#[program]
+Instance Set_Term: Term := {
+  T := Set ;
+  mt := Empty_set ;
+  trv := unit ;
+  sum := Datatypes.sum ;
+  prod := Datatypes.prod ;
+  exp A B := A → B ;
+}.
+
+Definition close_Term {A B} := @close Set_Term A B.
 
 Definition Forsome (x: Obj nat): Obj nat := basechange S (Π S x).
 Definition Forall (x: Obj nat): Obj nat := basechange S (Π S x).
