@@ -50,8 +50,17 @@ Module CylPoly.
 
   Coercion pos: Poly >-> Sortclass.
 
-  Definition V x: Poly := {| dir (_: unit) y := x = y |}.
+  Definition CoYo (Γ: string → Type) : Poly := {|
+    pos := unit ;
+    dir _ := Γ ;
+  |}.
+
   Definition K A: Poly := {| dir (_: A) _ := Empty_set |}.
+
+  Definition I: Poly := {|
+    pos := unit ;
+    dir _ _ := unit  ;
+  |}.
 
   Record ext (P: Poly) (Γ: string → Type) :=
     sup {
@@ -68,13 +77,22 @@ Module CylPoly.
   Definition map {H: Poly} {A B} (f: ∀ v, A v → B v) (x: H A): H B :=
       sup (tag x) (fun v y => f v (field x v y)).
 
-  Definition subst (x: string) (A: Type) Γ := λ y, if string_dec x y then A else Γ y.
-
-  Definition Π {A} (p: A → Poly): Poly :=
+  Definition Π {A: Type} (p: A → Poly): Poly :=
     {|
     pos := ∀ i, pos (p i) ;
     dir s x := someT (fun i => dir (p i) (s i) x) ;
     |}.
+  Definition exp A B := Π (λ _: A, B).
+
+ Definition bind (p: Poly) (q: string → Poly): Poly :=
+    {|
+    pos := p (λ x, pos (q x)) ;
+    dir s x :=
+      someT (fun i => dir (q x) (field s x i) x) ;
+    |}.
+
+  Definition compose x q p := bind p (λ y, exp (y = x) q).
+
   Definition Σ {A} (p: A → Poly): Poly :=
     {|
     pos := someT (fun i => pos (p i)) ;
@@ -97,10 +115,28 @@ Module CylPoly.
       end ;
     |}.
 
-  Definition scope (x: string) (A: Type) (Γ: string → Type) := λ y, {_: A | x = y } + { _: Γ y | x ≠ y }.
+
+  (* FIXME hacky *)
+  Definition V x: Poly := CoYo (λ y, x = y).
+  Definition subst (x: string) (A: Type) Γ := λ y, if string_dec x y then A else Γ y.
+
+  Definition scope (x: string) (A: Type) (Γ: string → Type) :=
+    λ y, {_: A | x = y } + { _: Γ y | x ≠ y }.
+
+  Definition All x S: Poly := CoYo (λ y, x = y → S).
 
   Infix "*" := prod.
   Infix "+" := sum.
+
+
+  (* FIXME not good *)
+  Definition diag (x y: string) :=
+    Σ (λ (Γ: string → Type), {|
+         pos := Γ x → Γ y ;
+         dir _ := Γ ;
+       |}).
+
+  Infix "~>" := diag (at level 30).
 
   Inductive w x (p: Poly) (Γ: string → Type) :=
   | rec (_: p (scope x (w x p Γ) Γ)).
@@ -157,8 +193,21 @@ Module CylPoly.
     - apply y.
   Defined.
 
-  Open Scope nat_scope.
-  Example bar := poflist [1 ; 3 ; 5].
+  Example gar {A B} (f: A → B): ext ("x" ~> "y") (oflist [("x", A) ; ("y", B)]).
+  Proof.
+    cbn.
+    eexists (some_intro (oflist [("x", A) ; ("y", B)]) _).
+    Unshelve.
+    2: {
+      cbn.
+      apply f.
+    }
+    cbn.
+    intros.
+    auto.
+  Defined.
+
+  Example bar := poflist ["foo" ; "bar" ; "xar"].
 End CylPoly.
 
 (* Free monad on a polynomial endofunctor *)
@@ -170,6 +219,8 @@ Module Poly.
   }.
 
   Coercion pos: Poly >-> Sortclass.
+
+  (* Definition K A: Poly := {| dir (_: A) := Empty_set |}. *)
 
   Record ext (P: Poly) A :=
     sup {
@@ -187,7 +238,10 @@ Module Poly.
 
   Definition X: Poly := {| dir (_: unit) := unit |}.
 
-  Definition K A: Poly := {| dir (_: A) := Empty_set |}.
+  Definition CoYo (A:  Type) : Poly := {|
+    pos := unit ;
+    dir _ := A ;
+  |}.
 
   Definition compose (p q: Poly): Poly :=
     {|
@@ -229,6 +283,169 @@ Module Poly.
   Definition exp A B := Π (λ _: A, B).
 End Poly.
 
+Module PolyCat.
+  Module Import Cat.
+    Inductive Obj := init | term | sum (_ _: Obj) | exp (_ _: Obj).
+    Inductive Mor: Obj → Obj → Type :=
+    | id A: Mor A A
+    | compose {A B C}: Mor B C → Mor A B → Mor A C
+    | absurd {A}: Mor init A
+    .
+  End Cat.
+
+  Module Import Dis.
+    Record Dis := {
+      pos: Type ;
+      dir: pos → Obj ;
+    }.
+
+    Record Mor (A B: Dis) := {
+      pos_Mor: pos A → pos B  ;
+      dir_Mor x: Cat.Mor (dir B (pos_Mor x)) (dir A x) ;
+    }.
+
+    Arguments pos_Mor {A B}.
+    Arguments dir_Mor {A B}.
+
+    Record ext (P: Dis) (x: Obj) := sup {
+       tag: pos P ;
+       field: Cat.Mor (dir P tag) x ;
+    }.
+
+    Arguments sup {P x}.
+    Arguments tag {P x}.
+    Arguments field {P x}.
+
+    Coercion ext: Dis >-> Funclass.
+
+    Definition Yo (x: Obj): Dis := {| dir (_: unit) := x |}.
+    Definition K (x: Type): Dis := {| dir (_: x) := init |}.
+
+    Definition Π {A} (p: A → Dis): Dis :=
+    {|
+      pos := A * (∀ i, pos (p i)) ;
+      dir '(x, f) := dir (p x) (f x) ;
+    |}.
+
+    Definition Σ {A} (p: A → Dis): Dis := {|
+      pos := someT (fun i => pos (p i)) ;
+      dir s := dir (p (head s)) (tail s) ;
+    |}.
+
+    Definition prod (p q: Dis): Dis := {|
+      pos := pos p * pos q ;
+      dir '(x, y) := sum (dir p x) (dir q y) ;
+     |}.
+
+    Definition sum (p q: Dis): Dis := {|
+      pos := pos p + pos q ;
+      dir v :=
+        match v with
+        | inl v' => dir p v'
+        | inr v' => dir q v'
+        end ;
+     |}.
+  End Dis.
+
+  #[universes(cumulative)]
+  Record Poly := {
+    pos: Dis ;
+    dir: Dis.Mor pos {| pos := Dis ; dir _ := init ; |} ;
+  }.
+
+  #[program]
+  Definition X: Poly := {|
+    pos := Yo term ;
+    dir := {|
+            pos_Mor _ := Yo term ;
+            dir_Mor _ := absurd ;
+           |} ;
+  |}.
+
+  #[program]
+  Definition CoYo (A: Dis) : Poly := {|
+    pos := Yo term  ;
+    dir := {|
+            pos_Mor _ := A ;
+            dir_Mor _ := absurd ;
+          |}
+  |}.
+
+  (* Definition comp (p q: Poly): Poly := *)
+  (*   {| *)
+  (*   pos := p (pos q) ; *)
+  (*   dir s := someT (fun i => dir q (field s i)) ; *)
+  (*   |}. *)
+  (* Infix "∘" := compose (at level 30). *)
+
+  #[program]
+  Definition Σ {A} (p: A → Poly): Poly :=
+    {|
+    pos := Σ (fun i => pos (p i)) ;
+    dir :=
+      {|
+        pos_Mor x := pos (p (head x)) ;
+        dir_Mor x := _ ;
+       |}
+    |}.
+
+  #[program]
+  Definition Π {A} (p: A → Poly): Poly :=
+    {|
+    pos := Π (λ i, pos (p i)) ;
+    dir := {|
+            pos_Mor '(x, f) := _ ;
+          |}
+  |}.
+
+  Next Obligation.
+  Proof.
+    cbn in *.
+    apply (dir (p (head x))).
+  Defined.
+
+  #[program]
+  Definition K A: Poly := {|
+    pos := A ;
+    dir := {|
+            pos_Mor _ := Yo init ;
+            dir_Mor _ := absurd ;
+          |} ;
+  |}.
+
+
+  #[program]
+  Definition prod (p q: Poly): Poly :=
+    {|
+     pos := Dis.prod (pos p) (pos q) ;
+     dir :=
+       {|
+         pos_Mor '(x, y) := Yo (Cat.sum (Dis.dir (pos p) x) (Dis.dir (pos q) y)) ;
+         dir_Mor _ := absurd ;
+       |} ;
+    |}.
+
+  #[program]
+  Definition sum (p q: Poly): Poly :=
+    {|
+    pos := sum (pos p) (pos q) ;
+    dir :=
+      {|
+        pos_Mor v :=
+          match v with
+          | inl v' => Yo (Dis.dir (pos p) v')
+          | inr v' => Yo (Dis.dir (pos q) v')
+          end ;
+        dir_Mor _ := absurd ;
+      |}
+    |}.
+
+  Infix "*" := prod.
+  Infix "+" := sum.
+
+  (* Definition exp A B := Π (λ _: A, B). *)
+End PolyCat.
+
 Module Span.
   #[universes(cumulative)]
    Record span A B := {
@@ -243,273 +460,123 @@ Module Span.
   Coercion s: span >-> Sortclass.
 
   Definition id A: span A A := {| π1 x := x ; π2 x := x |}.
+  Definition compose {A B C} (f: span B C) (g: span A B) := {|
+    s := { xy : s f * s g | π1 f (fst xy) = π2 g (snd xy) } ;
+    π1 x := π1 g (snd (proj1_sig x)) ;
+    π2 x := π1 f (fst (proj1_sig x)) ;
+  |}.
 
+  Infix "∘" := compose (at level 30).
+
+  #[universes(cumulative)]
   Class Span_Mor {A B} {s: span A B} {t: span A B} (f: s → t) := {
     map_π1 x: π1 t (f x) = π1 s x ;
     map_π2 x: π2 t (f x) = π2 s x ;
   }.
+
+  Inductive ext {A B} (p: span A B): A → B → Type :=
+  | sup x : ext p (π1 p x) (π2 p x).
+
+  Coercion ext: span >-> Funclass.
+
+
+  Definition map {A B} (f: A → B): span A B :=
+    {| π1 x := x ;
+       π2 := f ;
+     |}.
+
+  Definition K {A B} (x: A) (y: B): span A B :=
+    {|
+    s := unit ;
+    π1 _ := x ;
+    π2 _ := y ;
+    |}.
+
+  Definition transpose {A B} (p: span A B): span B A :=
+    {|
+    s := s p ;
+    π1 := π2 p ;
+    π2 := π1 p ;
+    |}.
+
+  Definition sum {A B} (p q: span A B): span A B :=
+    {|
+    s := s p + s q ;
+    π1 s :=
+      match s with
+      | inl x' => π1 p x'
+      | inr x' => π1 q x'
+      end ;
+    π2 s :=
+      match s with
+      | inl x' => π2 p x'
+      | inr x' => π2 q x'
+      end ;
+    |}.
+
+  Definition Σ {B C} {A: span B C} (p: A → span B C): span B C :=
+    {|
+    s := someT (fun i => s (p i)) ;
+    π1 s := π1 (p (head s)) (tail s) ;
+    π2 s := π2 (p (head s)) (tail s) ;
+    |}.
+
+
+  Definition prod {A B} (f g: span A B): span A B :=
+    {|
+    s := { xy : s f * s g |
+           π1 f (fst xy) = π1 g (snd xy) ∧
+           π2 f (fst xy) = π2 g (snd xy)
+         } ;
+    π1 s := π1 f (fst (proj1_sig s)) ;
+    π2 s := π2 f (fst (proj1_sig s)) ;
+    |}.
+
+  (* Not sure about this *)
+  Definition Π {B C} {A} (p: A → span B C): span B C :=
+    {|
+    s := { xy :
+             A *
+             (∀ i, s (p i)) |
+           (∀ i j,
+           π1 (p i) (snd xy i) = π1 (p j) (snd xy j) ∧
+           π2 (p i) (snd xy i) = π2 (p j) (snd xy j))
+         } ;
+    π1 s :=
+      let y := fst (proj1_sig s) in
+      π1 (p y) (snd (proj1_sig s) y) ;
+    π2 s :=
+      let y := fst (proj1_sig s) in
+      π2 (p y) (snd (proj1_sig s) y) ;
+    |}.
+
+  Record Poly B C := {
+    S: span B C ;
+    π: S → Type ;
+  }.
+
+  #[program]
+  Definition poly {B C} (S: span B C) (p: S → span B C) (X: span B C) :=
+    Σ (λ y: S,
+            {|
+              s := p y → X ;
+              π1 f := _ ;
+              π2 f := _ ;
+            |}).
+
+  Next Obligation.
+  Check poly.
+  Infix "∧" := prod.
+  Infix "∨" := sum.
+
+  Check poly.
+  Notation "'Σ' x .. y , P" := (Σ (λ x, .. (Σ (λ y,  P)) .. ))
+         (at level 200, x binder, y binder, right associativity,
+          format "'[ ' '[ ' 'Σ'  x .. y ']' ,  '/' P ']'").
 End Span.
-
-Module Import Finite.
-  Fixpoint fin (n: nat) :=
-    match n with
-    | O => Empty_set
-    | S n' => option (fin n')
-    end.
-
-  Definition swap N (x: fin (2 + N)): fin (2 + N) :=
-    match x with
-    | Some (Some e) => Some (Some e)
-    | Some None => None
-    | None => Some None
-    end.
-
-  Definition weaken N (x: fin N): fin (S N) := Some x.
-
-  Definition contract N (x: fin (2 + N)): fin (S N) :=
-    match x with
-    | Some (Some e) => Some e
-    | Some None => None
-    | None => None
-    end.
-
-  (* Not really sure about this *)
-  Definition fold N (x: fin (N + N)): fin N.
-  Proof.
-    induction N.
-    - cbn in *.
-      contradiction.
-    - cbn in *.
-      rewrite Nat.add_comm in x.
-      cbn in *.
-      refine (match x with
-              | Some (Some x') => Some (IHN x')
-              | _ => None
-              end).
-  Defined.
-
-End Finite.
-
-Definition Fin (xs: list string) := fin (List.length xs).
-
-Record Arena := {
-  pos: Type ;
-  dir: pos → nat ;
-}.
-
-Record ext (P: Arena) A :=
-  sup {
-      tag: _ ;
-      field: fin (dir P tag) → A ;
-    }.
-
-Arguments sup {P A}.
-Arguments tag {P A}.
-Arguments field {P A}.
-
-Infix "!" := field (at level 30).
-
-Coercion ext: Arena >-> Funclass.
-
-Open Scope nat_scope.
-
-(* Seems awkward, but sounds kind of right *)
-Definition Sum {A} (p: fin A → nat): nat.
-Proof.
-  induction A.
-  - apply 0.
-  - apply (IHA (λ x, p (Some x)) + p None).
-Defined.
-
-Lemma S_Proper: Proper (eq ==> eq) S.
-Proof.
-  intros ? ? p.
-  subst.
-  reflexivity.
-Qed.
-
-Lemma Sum_1 {N}: Sum (λ _ : fin N, 1) = N.
-Proof.
-Admitted.
-
-Definition Π {A} (p: fin A → Arena): Arena :=
-{|
-  pos := ∀ i, pos (p i) ;
-  dir s := Sum (fun i => dir (p i) (s i)) ;
-|}.
-
-Definition compose (p q: Arena): Arena :=
-{|
-  pos := p (pos q) ;
-  dir x :=
-    (* Product or sum ? *)
-    Sum (fun fld => dir q (x ! fld)) ;
-|}.
-
-Infix "∘" := compose (at level 30).
-
-Definition Σ {A} (p: A → Arena): Arena :=
-{|
-  pos := someT (fun i => pos (p i)) ;
-  dir s := dir (p (head s)) (tail s) ;
-|}.
-
-Definition K (s: Type) : Arena := {|
-  pos := s ;
-  dir _ := 0 ;
-|}.
-
-Definition prod (p q: Arena): Arena :=
-{|
-  pos := pos p * pos q ;
-  dir '(x, y) := dir p x + dir q y ;
-|}.
-
-Definition sum (p q: Arena): Arena :=
-  {|
-  pos := pos p + pos q ;
-  dir s :=
-    match s with
-    | inl x' => dir p x'
-    | inr x' => dir q x'
-    end ;
-  |}.
-
-Infix "*" := prod.
-Infix "+" := sum.
-
-Definition X: Arena := {|
-    pos := unit ;
-    dir _ := 1 ;
-|}.
-
-Definition δ: Arena := K unit + X.
-
-Definition D (p: Arena): Arena := p ∘ δ.
-
-Record Mor (A B: Arena) := {
-  op: pos A → pos B ;
-  map x: fin (dir B (op x)) → fin (dir A x) ;
-}.
-
-Arguments op {A B}.
-Arguments map {A B}.
-
-(* #[program] *)
-(* Definition swap {A: Arena}: Mor (δ ∘ δ) (δ ∘ δ) := *)
-(* {| *)
-(*   op p := p ; *)
-(*   map x y := _ ; *)
-(* |}. *)
-
-
-#[program]
-Definition up {A: Arena}: Mor X δ := {|
-  op _ := inr tt ;
-|}.
-
-#[program]
-Definition contract {A: Arena}: Mor (δ ∘ δ) δ :=
-  {|
-  op p := _ ;
-  map x y := _ ;
-  |}.
-
-Next Obligation.
-Proof.
-  destruct p.
-  cbn in *.
-  destruct tag0.
-  - apply (inl tt).
-  - cbn in *.
-    apply (field0 None).
-Defined.
-
-Next Obligation.
-Proof.
-  unfold contract_obligation_1 in *.
-  cbn in *.
-  destruct x.
-  cbn in *.
-(* #[program] *)
-(*  Definition eval {A: Arena} {x}: Mor (V x * D x A) A := *)
-(*   {| *)
-(*   op p := _ ; *)
-(*   map x y := _ ; *)
-(*   |}. *)
-
-(* Next Obligation. *)
-(* Proof. *)
-(*   apply (tag e). *)
-(* Defined. *)
-
-(* Next Obligation. *)
-(* Proof. *)
-(*   cbn in *. *)
-(*   refine (Some _). *)
-(* Defined. *)
-
-
-
-(* Free category on an endospan/free monad in Span(Set) *)
-Module Cat.
-  Import Span.
-
-  #[universes(cumulative)]
-   Inductive free {Obj} (H: span Obj Obj): Obj → Obj → Type :=
-  | id A: free H A A
-  | compose {A B C}: free H B C → free H A B → free H A C
-  | sup x: free H (π1 H x) (π2 H x)
-  .
-  Arguments id {Obj H}.
-  Arguments compose {Obj H A B C}.
-  Arguments sup {Obj}.
-
-  Definition Free {Obj} (H: span Obj Obj): span Obj Obj := {|
-    s := (Σ x y, free H x y) ;
-    π1 xy := head xy ;
-    π2 xy := head (tail xy) ;
-  |}.
-
-  Definition Sup {Obj} (H: span Obj Obj) (x: H): Free H.
-    exists (π1 H x).
-    exists (π2 H x).
-    apply (sup H x).
-  Defined.
-End Cat.
-
-(* Free indexed category on a displayed category *)
-Module IxCat.
-  Import Span.
-
-  Record displayed C := {
-    op: C → Type ;
-    map (c: C): span (op c) (op c) ;
-  }.
-
-  Arguments op {C}.
-  Arguments map {C}.
-
-  (* A displayed category C -> Span defines a functor D -> C *)
-
-  (* Kind of like a comma category *)
-  Record bundle {C} (H: displayed C) (c: C) := {
-    s: span (op H c) (op H c) ;
-    π: s → map H c ;
-    π_Span_Mor:> Span_Mor π ;
-  }.
-  Arguments s {C H c}.
-  Arguments π {C H c}.
-  Coercion s: bundle >-> span.
-
-  Definition over {C} (H: displayed C) c (s t: bundle H c) :=
-    { f: s → t | Span_Mor f ∧ ∀ x, π s x = π t (f x) }.
-End IxCat.
-
 Module Stlc.
-  Import Cat.
-  Import IxCat.
   Import Span.
+
 
   Inductive sort :=
   | pt
@@ -526,83 +593,64 @@ Module Stlc.
   Inductive fact := ofty (Γ: env) (e: term) (τ: sort).
   Notation "Γ ⊢ e ∈ τ" := (ofty Γ e τ) (at level 30).
 
-  Inductive rule: env → sort → Type :=
-  | var_rule (Γ: env) (x: string) (τ: sort) (p: In (x, τ) Γ): rule Γ τ
-  | lam_rule (Γ: env) (x: string) (τ0 τ1: sort) (e:term): rule Γ (exp τ0 τ1)
-  | app_rule (Γ: env) (e0 e1: term) (τ0 τ1: sort): rule Γ τ1
+  Example judge: span (list fact) (list fact) :=
+    Σ A,
+      K A [] ∨
+    Σ A B T,
+      K (A :: B :: T)
+        (B :: A :: T) ∨
+    Σ A B T,
+      K (A :: B :: T)
+        (A :: T) ∨
+    Σ A B T,
+      K (A :: B :: T)
+        (B :: T) ∨
+    Σ Γ e τ T,
+      K (Γ ⊢ e ∈ τ :: T)
+        (Γ ⊢ e ∈ τ :: T)
   .
 
-  Example judge (Γ: env) (τ: sort) (r: rule Γ τ): (list fact * list fact) :=
+  Inductive rule {Γ: string → fact} :=
+  | ignore_rule (A: list fact)
+  | swap_rule (T: list fact) (A B: fact)
+  | fst_rule (T: list fact) (A B: fact)
+  | snd_rule (T: list fact) (A B: fact)
+
+  | lookup_rule (T: list fact) (x: string)
+  .
+  Arguments rule: clear implicits.
+
+  Example judge (Γ: string → fact) (r: rule Γ): (list fact * list fact) :=
     match r with
-    | var_rule Γ x τ _ =>
-      ([],
-       [Γ ⊢ var x ∈ τ])
-    | lam_rule Γ x τ0 τ1 e =>
-      ([((x, τ0) :: Γ) ⊢ e ∈ τ1],
-       [Γ ⊢ lam x τ0 e ∈ exp τ0 τ1])
-    | app_rule Γ e0 e1 τ0 τ1 =>
-      ([Γ ⊢ e0 ∈ exp τ0 τ1 ; Γ ⊢ e1 ∈ τ0],
-       [Γ ⊢ app e0 e1 ∈ τ1])
+    | ignore_rule A =>
+      (A,
+       [])
+    | lookup_rule T x =>
+      (T,
+       Γ x :: T)
+    | swap_rule T A B =>
+      (A :: B :: T,
+       B :: A :: T)
+    | fst_rule T A B =>
+      (A :: B :: T,
+       A :: T)
+    | snd_rule T A B =>
+      (A :: B :: T,
+       B :: T)
     end.
 
-  Example theory := {|
+  Example theory: displayed fact := {|
     map e := {|
-              π1 r := fst (judge (fst e) (snd e) r) ;
-              π2 r := snd (judge (fst e) (snd e) r) ;
+              π1 r := fst (judge e r) ;
+              π2 r := snd (judge e r) ;
             |} ;
   |}.
-  Definition theorem {c} := over theory c.
+  Definition theorem := free theory.
 
-  Definition bun Γ τ
-             (s: span (op theory (Γ, τ)) (op theory (Γ, τ)))
-             (f: s → map theory (Γ, τ))
-    `{Span_Mor _ _ _ _ f}: bundle theory (Γ, τ).
-    exists s f.
-    auto.
-  Defined.
+  Example ignore Γ A: theorem Γ A [] := sup (map theory _) (ignore_rule A).
+  Example lookup Γ x: theorem Γ [] [Γ x] := sup (map theory _) (lookup_rule [] x).
 
-  Instance id_Span_Mor Γ τ: Span_Mor (λ x : map theory (Γ, τ), x).
-  Proof.
-    exists.
-    - cbn.
-      intro.
-      reflexivity.
-    - cbn.
-      intro.
-      reflexivity.
-  Qed.
-
-  Definition ident Γ τ := bun Γ τ (λ x, x).
-
-  Definition foo Γ τ: theorem (ident Γ τ) (ident Γ τ).
-  Proof.
-    eexists.
-    Unshelve.
-    2: {
-      auto.
-    }
-  Admitted.
-
-  (* A -> m A *)
-  (* kleisli arrow ~ pure ~ id
-    O -> span O O
-
-    based around join/map
-   A * (A -> m b) -> m b
-   *)
-
-  (* Inductive ext {Obj} (S: span Obj Obj): Obj → Obj → Type := *)
-  (* | ext_intro x: ext S (π1 S x) (π2 S x). *)
-
-  (* Definition codensity A := ∀ B C, (A → ext theory B C) → ext theory B C. *)
-
-(* Codensity monad
-
- *)
-
-  Example var' Γ x τ p: theorem (Γ ⊢ var x ∈ τ) [] [Γ ⊢ var x ∈ τ] := sup (map theory _) (var_rule Γ x τ p).
-
-  Example lam' Γ x τ0 τ1 e: free theory _ [_] [_] := sup (map theory _) (lam_rule Γ x τ0 τ1 e).
+  Example swap' Γ A B T: theorem Γ (A :: B :: T) (B :: A :: T) := sup (map theory _) (swap_rule T A B).
 
   Example app' Γ e0 e1 τ0 τ1: free theory _ [_ ; _] [_] := sup (map theory _) (app_rule Γ e0 e1 τ0 τ1).
 
@@ -671,6 +719,95 @@ x
       all: subst.
       + cbn.
 End Stlc.
+
+Module Import Finite.
+  Fixpoint fin (n: nat) :=
+    match n with
+    | O => Empty_set
+    | S n' => option (fin n')
+    end.
+
+  Definition swap N (x: fin (2 + N)): fin (2 + N) :=
+    match x with
+    | Some (Some e) => Some (Some e)
+    | Some None => None
+    | None => Some None
+    end.
+
+  Definition weaken N (x: fin N): fin (S N) := Some x.
+
+  Definition contract N (x: fin (2 + N)): fin (S N) :=
+    match x with
+    | Some (Some e) => Some e
+    | Some None => None
+    | None => None
+    end.
+
+  (* Not really sure about this *)
+  Definition fold N (x: fin (N + N)): fin N.
+  Proof.
+    induction N.
+    - cbn in *.
+      contradiction.
+    - cbn in *.
+      rewrite Nat.add_comm in x.
+      cbn in *.
+      refine (match x with
+              | Some (Some x') => Some (IHN x')
+              | _ => None
+              end).
+  Defined.
+
+End Finite.
+
+(* Free category on an endospan/free monad in Span(Set) *)
+Module Cat.
+  Import Span.
+
+  (* Doesn't seem right *)
+  #[universes(cumulative)]
+   Inductive free {Obj} (H: span Obj Obj): Obj → Obj → Type :=
+  | id A: free H A A
+  | compose {A B C}: free H B C → free H A B → free H A C
+  | sup x: free H (π1 H x) (π2 H x)
+  .
+  Arguments id {Obj H}.
+  Arguments compose {Obj H A B C}.
+  Arguments sup {Obj}.
+End Cat.
+
+(* Free indexed category on a displayed category *)
+Module IxCat.
+  Import Span.
+  Import Cat.
+
+  Record displayed C := {
+    op: C → Type ;
+    map (c: C): span (op c) (op c) ;
+  }.
+
+  Arguments op {C}.
+  Arguments map {C}.
+
+  Coercion op: displayed >-> Funclass.
+
+  (* A displayed category C -> Span defines a functor D -> C *)
+
+  Definition free {V} (H: displayed V) Γ := free (map H Γ).
+End IxCat.
+
+Module CylCat.
+  Import Span.
+  Import Cat.
+  Import IxCat.
+
+  Definition displayed V := displayed (string → V).
+
+  (* A cylindrified displayed category [string, V] -> Span defines an
+  indexed category [string, V] → Cat *)
+  Definition free {V} (H: displayed V) Γ := free H Γ.
+End CylCat.
+
 
 
 (* Free indexed monad on an indexed polynomial endofunctor *)
