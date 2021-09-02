@@ -79,6 +79,7 @@ Proof.
   decide equality.
 Defined.
 
+Definition mt: string → term := var.
 Definition put x A (Γ: string → term) : string → term :=
   λ y, if string_dec x y then A else Γ y.
 
@@ -233,54 +234,15 @@ Inductive
 
 where "x ; A ≡ B" := (maps x A B).
 
-Reserved Notation "Γ ⊢ x ∈ A" (at level 80).
-
-Inductive
-  types (Γ: string → term): term → term → Type :=
-| types_var x: Γ ⊢ var x ∈ Γ x
-| types_ofU u: Γ ⊢ ofU u ∈ ofU (succU u)
-
-| types_all {K L x A B}:
-    Γ ⊢ A ∈ K →
-    put x A Γ ⊢ B ∈ L →
-    Γ ⊢ all x A B ∈ L
-
-| types_lam K x A B e:
-    Γ ⊢ A ∈ K →
-    put x A Γ ⊢ e ∈ B →
-    Γ ⊢ lam x A e ∈ all x A B
-
-| types_app x e0 e1 A B:
-    Γ ⊢ e0 ∈ all x A B →
-    Γ ⊢ e1 ∈ A →
-    Γ ⊢ app e0 e1 ∈ [x := e1] B
-
-| types_compose A B e0 e1:
-    Γ ⊢ e0 ∈ A →
-    Γ ⊢ e1 ∈ B →
-    Γ ⊢ e0 ∘ e1 ∈ (A ∘ B)
-| types_sym A e:
-    Γ ⊢ e ∈ A →
-    Γ ⊢ sym e ∈ A
-| types_beta x A B e0 e1:
-    Γ ⊢ app (lam x A e0) e1 ∈ B →
-    Γ ⊢ [x := e1] e0 ∈ B →
-    Γ ⊢ beta x A e0 e1 ∈ B
-
-| types_cast K e0 e1 A B :
-    Γ ⊢ e0 ∈ K →
-    e0 ; A ≡ B →
-    Γ ⊢ e1 ∈ A →
-    Γ ⊢ e1 ∈ B
-where "Γ ⊢ x ∈ A" := (types Γ x A).
-
 Function
   st (e: term): option (term * term) :=
   match e with
+  | var x => Some (var x, var x)
+
   | all y A e =>
-    if st A is Some (sA, tA)
+    if st  A is Some (sA, tA)
     then
-      if st e is Some (se, te)
+      if st  e is Some (se, te)
       then
         Some (all y sA se, all y tA te)
       else
@@ -289,9 +251,9 @@ Function
       None
 
   | lam y A e =>
-    if st A is Some (sA, tA)
+    if st  A is Some (sA, tA)
     then
-      if st e is Some (se, te)
+      if st  e is Some (se, te)
       then
         Some (lam y sA se, lam y tA te)
       else
@@ -300,9 +262,9 @@ Function
       None
 
   | app e0 e1 =>
-    if st e0 is Some (se0, te0)
+    if st  e0 is Some (se0, te0)
     then
-      if st e1 is Some (se1, te1)
+      if st  e1 is Some (se1, te1)
       then
         Some (app se0 se1, app te0 te1)
       else
@@ -311,9 +273,9 @@ Function
       None
 
   | e0 ∘ e1 =>
-    if st e0 is Some (se0, te0)
+    if st  e0 is Some (se0, te0)
     then
-      if st e1 is Some (se1, te1)
+      if st  e1 is Some (se1, te1)
       then
         if term_dec se0 te1
         then
@@ -326,7 +288,7 @@ Function
       None
 
   | sym e =>
-    if st e is Some (se, te)
+    if st  e is Some (se, te)
     then
       Some (te, se)
     else
@@ -388,6 +350,68 @@ Proof.
   - rewrite (subst_complete H5).
     reflexivity.
 Defined.
+
+Reserved Notation "Γ ⊢ x ∈ A" (at level 80).
+
+Inductive
+  types (Γ: string → term): term → term → Type :=
+| types_var x: Γ ⊢ var x ∈ Γ x
+| types_ofU u: Γ ⊢ ofU u ∈ ofU (succU u)
+
+| types_all {K L x A B}:
+    Γ ⊢ A ∈ K →
+    put x A Γ ⊢ B ∈ L →
+    Γ ⊢ all x A B ∈ L
+
+| types_lam K x A B e:
+    Γ ⊢ A ∈ K →
+    put x A Γ ⊢ e ∈ B →
+    Γ ⊢ lam x A e ∈ all x A B
+
+| types_app x e0 e1 A B:
+    Γ ⊢ e0 ∈ all x A B →
+    Γ ⊢ e1 ∈ A →
+    Γ ⊢ app e0 e1 ∈ [x := e1] B
+
+| types_compose A B e0 e1:
+    Γ ⊢ e0 ∈ A →
+    Γ ⊢ e1 ∈ B →
+    Γ ⊢ e0 ∘ e1 ∈ (A ∘ B)
+| types_sym A e:
+    Γ ⊢ e ∈ A →
+    Γ ⊢ sym e ∈ A
+| types_beta x A B e0 e1:
+    Γ ⊢ app (lam x A e0) e1 ∈ B →
+    Γ ⊢ [x := e1] e0 ∈ B →
+    Γ ⊢ beta x A e0 e1 ∈ B
+
+(* | types_cast K e0 e1 A B : *)
+(*     Γ ⊢ e0 ∈ K → *)
+(*     e0 ; A ≡ B → *)
+(*     Γ ⊢ e1 ∈ A → *)
+(*     Γ ⊢ e1 ∈ B *)
+where "Γ ⊢ x ∈ A" := (types Γ x A).
+
+
+Definition subst_preserves_equiv:
+  ∀ {x s e p q},
+    s ; s ≡ s →
+    e ; p ≡ q →
+    [x := s] e ; [x := s] p ≡ [x := s] q.
+Proof.
+  intros x s e.
+  induction e.
+  all: intros ? ? sobj r.
+  all: inversion r.
+  all: cbn in *.
+  all: subst.
+  all: auto.
+  all: try destruct (string_dec x x0).
+  all: subst.
+  all: try (econstructor;eauto).
+  1: apply sobj.
+Admitted.
+
 
 Inductive normal: term → Type :=
 | norm_ofU u: normal (ofU u)
@@ -454,70 +478,6 @@ Inductive
 | halt {A}: A ~>* A
 | next {A B C}: A ~> B → B ~>* C → A ~>* C
 where "A ~>* B" := (big A B).
-
-Definition preserve_equiv:
-  ∀ {e e'},
-    e ~> e' →
-    ∀ {A B},
-    e ; A ≡ B → e' ; A ≡ B.
-Proof.
-  intros e.
-  induction e.
-  all: intros e' p.
-  all: inversion p.
-  all: subst.
-  all: intros ? ? q.
-  all: inversion q.
-  all: subst.
-  all: try econstructor.
-  all: try eauto.
-  inversion H1.
-  subst.
-Admitted.
-
-Definition preservation:
-  ∀ {e e'},
-    e ~> e' →
-    ∀ {Γ A},
-    Γ ⊢ e ∈ A → Γ ⊢ e' ∈ A.
-Proof.
-  intros e.
-  induction e.
-  all: intros e' p.
-  all: inversion p.
-  all: subst.
-  all: intros Γ T q.
-  all: inversion q.
-  all: subst.
-Admitted.
-
-Definition progress:
-  ∀ {e},
-    nn e →
-    ∀ Γ A, Γ ⊢ e ∈ A →
-    Σ e', e ~> e'.
-Proof.
-  intros e.
-  all: induction e.
-  all: intros p.
-  all: inversion p.
-  all: subst.
-  all: intros Γ T q.
-  all: inversion q.
-  all: subst.
-  - destruct H0.
-    + destruct (IHe1 n Γ _ H4) as [e1' r].
-      exists (all x e1' e2).
-      econstructor.
-      auto.
-    + destruct (IHe2 n _ _ H5) as [e2' r].
-      exists (all x e1 e2').
-      econstructor.
-      auto.
-Admitted.
-
-
-Example id := lam "A" set (lam "x" (var "A") (var "x")).
 
 Function eval e :=
   match e with
@@ -592,6 +552,70 @@ Proof.
   all: try (set (q := IHe2 _ H2); rewrite q).
   all: try reflexivity.
 Admitted.
+
+Definition preserve_equiv:
+  ∀ {e e'},
+    e ~> e' →
+    ∀ {A B},
+    e ; A ≡ B → e' ; A ≡ B.
+Proof.
+  intros e.
+  induction e.
+  all: intros e' p.
+  all: inversion p.
+  all: subst.
+  all: intros ? ? q.
+  all: inversion q.
+  all: subst.
+  all: try econstructor.
+  all: try eauto.
+  inversion H1.
+  subst.
+Admitted.
+
+Definition preservation:
+  ∀ {e e'},
+    e ~> e' →
+    ∀ {Γ A},
+    Γ ⊢ e ∈ A → Γ ⊢ e' ∈ A.
+Proof.
+  intros e.
+  induction e.
+  all: intros e' p.
+  all: inversion p.
+  all: subst.
+  all: intros Γ T q.
+  all: inversion q.
+  all: subst.
+Admitted.
+
+Definition progress:
+  ∀ {e},
+    nn e →
+    ∀ Γ A, Γ ⊢ e ∈ A →
+    Σ e', e ~> e'.
+Proof.
+  intros e.
+  all: induction e.
+  all: intros p.
+  all: inversion p.
+  all: subst.
+  all: intros Γ T q.
+  all: inversion q.
+  all: subst.
+  - destruct H0.
+    + destruct (IHe1 n Γ _ H4) as [e1' r].
+      exists (all x e1' e2).
+      econstructor.
+      auto.
+    + destruct (IHe2 n _ _ H5) as [e2' r].
+      exists (all x e1 e2').
+      econstructor.
+      auto.
+Admitted.
+
+
+Example id := lam "A" set (lam "x" (var "A") (var "x")).
 
 Definition tr A := ∀ (B: Prop), (A → B) → B.
 
