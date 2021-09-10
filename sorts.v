@@ -13,108 +13,121 @@ Require Import Coq.Unicode.Utf8.
 
 Import IfNotations.
 
-#[universes(cumulative)]
-CoInductive U :=
-| const (T: Type)
-| sum (_ _: U)
-| prod (_ _: U)
-.
-
-Infix "*" := prod.
-Infix "+" := sum.
-
-Definition leftu (u: U): U :=
-  match u with
-  | sum l _ => l
-  | _ => const Empty_set
-  end.
-Definition rightu (u: U): U :=
-  match u with
-  | sum _ r => r
-  | _ => const Empty_set
-  end.
-
-Definition cast {u} (x: if u is _ + _ then bool else unit): option bool.
+Inductive Tag := Const | Sum | Prod.
+Definition eq_Tag (x y: Tag): {x = y} + {x ≠ y}.
 Proof.
+  decide equality.
+Defined.
+
+Definition eqb x y := if eq_Tag x y then True else False.
+
+#[universes(cumulative)]
+CoInductive U := u {
+  tag: Tag ;
+  const_u: eqb tag Const → Type ;
+  sum_left: eqb tag Sum → U ;
+  sum_right: eqb tag Sum → U ;
+  prod_left: eqb tag Prod → U ;
+  prod_right: eqb tag Prod → U ;
+}.
+
+Notation "'const' A" := {|
+  tag := Const ;
+  const_u _ := A ;
+
+  prod_left x := match x: False with end ;
+  prod_right x := match x: False with end ;
+  sum_left x := match x: False with end ;
+  sum_right x := match x: False with end ;
+|} (at level 1).
+
+Notation "A * B" := {|
+  tag := Prod ;
+  prod_left _ := A ;
+  prod_right _ := B ;
+
+  const_u x := match x: False with end ;
+  sum_left x := match x: False with end ;
+  sum_right x := match x: False with end ;
+|}.
+Notation "A + B" := {|
+  tag := Sum ;
+  sum_left _ := A ;
+  sum_right _ := B ;
+
+  const_u x := match x: False with end ;
+  prod_left x := match x: False with end ;
+  prod_right x := match x: False with end ;
+|}.
+
+Definition is_const: U → option Type.
+Proof.
+  intro u.
   destruct u.
-  - apply None.
-  - apply Some.
-    apply x.
-  - apply None.
+  destruct (eq_Tag tag0 Const).
+  2: apply None.
+  subst.
+  apply Some.
+  apply const_u0.
+  apply I.
+Defined.
+
+Definition is_sum: U → option (U * U).
+Proof.
+  intro u.
+  destruct u.
+  destruct (eq_Tag tag0 Sum).
+  2: apply None.
+  subst.
+  apply Some.
+  split.
+  - apply sum_left0.
+    cbn.
+    apply I.
+  - apply sum_right0.
+    cbn.
+    apply I.
+Defined.
+
+Definition is_prod: U → option (U * U).
+Proof.
+  intro u.
+  destruct u.
+  destruct (eq_Tag tag0 Prod).
+  2: apply None.
+  subst.
+  apply Some.
+  split.
+  - apply prod_left0.
+    cbn.
+    apply I.
+  - apply prod_right0.
+    cbn.
+    apply I.
 Defined.
 
 #[universes(cumulative)]
-CoInductive El (u: U) := el {
-  unbox: if u is const T then T else unit ;
-
-  fst: El (if u is A * _ then A else const unit) ;
-  snd: El (if u is _ * B then B else const unit) ;
-
-  tag:
-    if u is _ + _ then bool else unit ;
-  left:
-    El (if cast tag is Some false then leftu u else const unit) ;
-  right:
-    El (if cast tag is Some true then rightu u else const unit) ;
-}.
-
-Arguments unbox {u}.
-Arguments fst {u}.
-Arguments snd {u}.
-Arguments tag {u}.
-Arguments left {u}.
-Arguments right {u}.
+Inductive El (u: U) :=
+| El_const:
+    (if is_const u is Some T then T else False) → El u
+| El_pair:
+    El (if is_prod u is Some (A, _) then A else const Empty_set) →
+    El (if is_prod u is Some (_, B) then B else const Empty_set) →
+    El u
+| El_inl:
+    El (if is_sum u is Some (A, _) then A else const Empty_set) →
+    El u
+| El_inr:
+    El (if is_sum u is Some (_, B) then B else const Empty_set) →
+    El u
+.
 
 Coercion El: U >-> Sortclass.
 
-Definition pt: const unit.
-Proof.
-  cofix p.
-  econstructor.
-  Unshelve.
-  6: apply tt.
-  - apply tt.
-  - apply p.
-  - apply p.
-  - cbn.
-    apply p.
-  - cbn.
-    apply p.
-Defined.
-
-Notation "'box' x" := (el (const _) x pt pt tt pt pt) (at level 1).
-Notation "⟨ x , y ⟩" := (el (prod _ _) tt x y tt pt pt).
-Notation "'inl' x" := (el (sum _ _) tt pt pt false x pt) (at level 1).
-Notation "'inr' x" := (el (sum _ _) tt pt pt true pt x) (at level 1).
-
-Definition foo {A} (x: A): const A := box x.
-Definition bar {A B} (x: El A) (y: El B): El (A * B) := ⟨ x , y ⟩.
-Definition l {A B} (x: El A): El (A + B) := inl x.
-Definition r {A B} (x: El B): El (A + B) := inr x.
+Definition pt: El (const unit) := El_const (const unit) tt.
 
 CoFixpoint list A := const unit + (const A * list A).
 
-Definition nil {A}: list A.
-  unfold list.
-  cbn in *.
-  econstructor.
-  Unshelve.
-  all: cbn in *.
-  6: apply false.
-  all: cbn in *.
-  all: try apply pt.
-Defined.
-
-Definition cons {A} (h: A) (t: list A): list A.
-  unfold list.
-  cbn in *.
-  econstructor.
-  Unshelve.
-  all: cbn in *.
-  6: apply true.
-  all: cbn in *.
-  all: try apply pt.
-  refine ⟨ _, _ ⟩.
-  - apply (box h).
-  - apply t.
-Defined.
+Definition nil {A}: list A := El_inl (list A) (El_const (const unit) tt).
+Definition cons {A} (h: A) (t: list A): list A :=
+  El_inr (list A) (El_pair (const A * list A) (El_const (const A) h) t).
