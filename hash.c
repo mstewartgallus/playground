@@ -11,7 +11,7 @@ I made this this morning while practising for an interview.
 Probably really, really buggy and unfit for production use.
  */
 
-struct cuck;
+struct table;
 
 struct evict {
         bool found;
@@ -24,12 +24,12 @@ enum rehashed { REHASHED, FAIL };
 /*
   salt: see http://ocert.org/advisories/ocert-2011-003.html
  */
-struct cuck *cuck_new(char const *salt, size_t capacity);
-void cuck_delete(struct cuck *cuck);
+struct table *table_new(char const *salt, size_t capacity);
+void table_delete(struct table *table);
 
-struct evict cuck_put(struct cuck *cuck, char const *key, void *val);
-void *cuck_get(struct cuck *cuck, char const *key);
-enum rehashed cuck_copy(struct cuck const *cuck, struct cuck *new);
+struct evict table_put(struct table *table, char const *key, void *val);
+void *table_get(struct table *table, char const *key);
+enum rehashed table_copy(struct table const *table, struct table *new);
 
 static struct {
         char const *key;
@@ -49,7 +49,7 @@ int main(int argc, char **argv)
         static char const salt[] = { "ASALT" };
 
         size_t capacity = INITIAL_CAPACITY;
-        struct cuck *cuck = cuck_new(salt, capacity);
+        struct table *table = table_new(salt, capacity);
 
         for (int ii = 0; ii < sizeof keyvals/sizeof keyvals[0]; ++ii) {
                 char const *key = keyvals[ii].key;
@@ -57,7 +57,7 @@ int main(int argc, char **argv)
 
                 struct evict evict;
                 for (;;) {
-                        evict = cuck_put(cuck, key, (void*)val);
+                        evict = table_put(table, key, (void*)val);
                         if (!evict.found) {
                                 break;
                         }
@@ -66,25 +66,25 @@ int main(int argc, char **argv)
                         printf("collision! %s %s\n", key, val);
 
                         size_t new_capacity = 2 * capacity + 1;
-                        struct cuck *new = cuck_new(salt, new_capacity);
-                        if (cuck_copy(cuck, new) != REHASHED) {
+                        struct table *new = table_new(salt, new_capacity);
+                        if (table_copy(table, new) != REHASHED) {
                                 puts("rehash failed");
                                 abort();
                         }
-                        cuck_delete(cuck);
-                        cuck = new;
+                        table_delete(table);
+                        table = new;
                         capacity = new_capacity;
                 }
         }
 
         for (int ii = 0; ii < sizeof keyvals/sizeof keyvals[0]; ++ii) {
                 char const *key = keyvals[ii].key;
-                char const *val = (char const *)cuck_get(cuck, key);
+                char const *val = (char const *)table_get(table, key);
 
                 printf("%s |-> %s\n", key, val);
         }
 
-        cuck_delete(cuck);
+        table_delete(table);
         return 0;
 }
 
@@ -142,7 +142,7 @@ struct lookup {
 static struct hash *hash_new(char const *salt, size_t capacity);
 static void hash_delete(struct hash *hash);
 
-static enum rehashed hash_copy(struct hash const *hash, struct cuck *cuck);
+static enum rehashed hash_copy(struct hash const *hash, struct table *table);
 
 static struct evict hash1_put(struct hash *hash, char const *key, void *val);
 static struct lookup hash1_get(struct hash *hash, char const *key);
@@ -150,40 +150,40 @@ static struct lookup hash1_get(struct hash *hash, char const *key);
 static struct evict hash2_put(struct hash *hash, char const *key, void *val);
 static struct lookup hash2_get(struct hash *hash, char const *key);
 
-struct cuck {
+struct table {
         struct hash *restrict hash1;
         struct hash *restrict hash2;
 };
 
 enum { MAX_EVICT = 8 };
 
-struct cuck *cuck_new(char const *salt, size_t capacity)
+struct table *table_new(char const *salt, size_t capacity)
 {
-        struct cuck *ptr = malloc(sizeof *ptr);
-        *ptr = (struct cuck) {
+        struct table *ptr = malloc(sizeof *ptr);
+        *ptr = (struct table) {
                 .hash1 = hash_new(salt, capacity),
                 .hash2 = hash_new(salt, capacity),
         };
         return ptr;
 }
 
-void cuck_delete(struct cuck *cuck)
+void table_delete(struct table *table)
 {
-        hash_delete(cuck->hash1);
-        hash_delete(cuck->hash2);
-        free(cuck);
+        hash_delete(table->hash1);
+        hash_delete(table->hash2);
+        free(table);
 }
 
-enum rehashed cuck_copy(struct cuck const *cuck, struct cuck *new)
+enum rehashed table_copy(struct table const *table, struct table *new)
 {
         enum rehashed rehashed;
 
-        rehashed = hash_copy(cuck->hash1, new);
+        rehashed = hash_copy(table->hash1, new);
         if (rehashed != REHASHED) {
                 return rehashed;
         }
 
-        rehashed = hash_copy(cuck->hash2, new);
+        rehashed = hash_copy(table->hash2, new);
         if (rehashed != REHASHED) {
                 return rehashed;
         }
@@ -191,12 +191,12 @@ enum rehashed cuck_copy(struct cuck const *cuck, struct cuck *new)
         return rehashed;
 }
 
-struct evict cuck_put(struct cuck *cuck, char const *key, void *val)
+struct evict table_put(struct table *table, char const *key, void *val)
 {
         struct evict evict;
 
         for (int ii = 0; ii < MAX_EVICT; ++ii) {
-                evict = hash1_put(cuck->hash1, key, val);
+                evict = hash1_put(table->hash1, key, val);
                 if (!evict.found) {
                         return (struct evict){.found = false};
                 }
@@ -204,7 +204,7 @@ struct evict cuck_put(struct cuck *cuck, char const *key, void *val)
                 key = evict.key;
                 val = evict.value;
 
-                evict = hash2_put(cuck->hash2, key, val);
+                evict = hash2_put(table->hash2, key, val);
                 if (!evict.found) {
                         return (struct evict){.found = false};
                 }
@@ -216,15 +216,15 @@ struct evict cuck_put(struct cuck *cuck, char const *key, void *val)
         return evict;
 }
 
-void *cuck_get(struct cuck *cuck, char const *key)
+void *table_get(struct table *table, char const *key)
 {
         struct lookup lookup;
 
-        lookup = hash1_get(cuck->hash1, key);
+        lookup = hash1_get(table->hash1, key);
         if (lookup.found) {
                 return lookup.value;
         }
-        lookup = hash2_get(cuck->hash2, key);
+        lookup = hash2_get(table->hash2, key);
         if (lookup.found) {
                 return lookup.value;
         }
@@ -262,7 +262,7 @@ static void hash_delete(struct hash *hash)
         free(hash);
 }
 
-static enum rehashed hash_copy(struct hash const *hash, struct cuck *cuck)
+static enum rehashed hash_copy(struct hash const *hash, struct table *table)
 {
         /* assume if it's time to rehash we have a decent load factor,
          * say 0.5 so it's okay to iterate over everything */
@@ -277,7 +277,7 @@ static enum rehashed hash_copy(struct hash const *hash, struct cuck *cuck)
                 char const *key = hash->keys[ii];
                 void *val = hash->value[ii];
 
-                struct evict evict = cuck_put(cuck, key, val);
+                struct evict evict = table_put(table, key, val);
                 if (evict.found) {
                         /* FIXME: not sure how to handle collisions
                          * during rehashing */
